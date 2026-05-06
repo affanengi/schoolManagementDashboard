@@ -20,13 +20,13 @@ const events = [
         description: "Lorem ipsum dolor sit amet, consectetur elit.", 
     },
     {
-        id: 1,
+        id: 2,
         title: "Lorem ipsum dolor",
         time: "12.00 PM - 2.00 PM",
         description: "Lorem ipsum dolor sit amet, consectetur elit.", 
     },
     {
-        id: 1,
+        id: 3,
         title: "Lorem ipsum dolor",
         time: "12.00 PM - 2.00 PM",
         description: "Lorem ipsum dolor sit amet, consectetur elit.", 

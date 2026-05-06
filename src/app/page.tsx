@@ -1,7 +1,11 @@
-const Homepage = () => {
-  return (
-    <div className=''>Homepage</div>
-  )
-}
+import { role } from "@/lib/data";
+import { redirect } from "next/navigation";
 
-export default Homepage
+const Homepage = () => {
+  if (role) {
+    redirect(`/dashboard/${role}`);
+  }
+  return <div className="">Homepage</div>;
+};
+
+export default Homepage;

@@ -61,9 +61,9 @@ export default function SingleStudentPage() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Access guard — admin + teacher only
+  // Access guard — admin + teacher + parent (read-only)
   useEffect(() => {
-    if (!authLoading && role && role !== "admin" && role !== "teacher") {
+    if (!authLoading && role && role !== "admin" && role !== "teacher" && role !== "parent") {
       router.replace("/dashboard");
     }
   }, [role, authLoading, router]);

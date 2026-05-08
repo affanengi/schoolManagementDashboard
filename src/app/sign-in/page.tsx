@@ -19,10 +19,9 @@ const SignInPage = () => {
     setLoading(true);
     setError("");
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      const route = user.email === "mohammedaffanrazvi604@gmail.com" ? "/dashboard/admin" : "/dashboard/student";
-      router.push(route);
+      await signInWithEmailAndPassword(auth, email, password);
+      // Always go to /dashboard — AuthProvider detects the correct role (admin/teacher/student)
+      router.push("/dashboard");
     } catch (err: any) {
       setError(err.message || "Failed to sign in.");
     } finally {
@@ -35,10 +34,9 @@ const SignInPage = () => {
     setError("");
     const provider = new GoogleAuthProvider();
     try {
-      const userCredential = await signInWithPopup(auth, provider);
-      const user = userCredential.user;
-      const route = user.email === "mohammedaffanrazvi604@gmail.com" ? "/dashboard/admin" : "/dashboard/student";
-      router.push(route);
+      await signInWithPopup(auth, provider);
+      // Always go to /dashboard — AuthProvider detects the correct role (admin/teacher/student)
+      router.push("/dashboard");
     } catch (err: any) {
       setError(err.message || "Failed to sign in with Google.");
     } finally {

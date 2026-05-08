@@ -7,10 +7,67 @@ import FinanceChart from "@/components/FinanceChart";
 import UserCard from "@/components/UserCard";
 import { useState } from "react";
 import { resetAndSeedAllData, seedDemoLessons } from "@/lib/seedDemoData";
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
 
 const AdminPage = () => {
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState("");
+  const [repairing, setRepairing] = useState(false);
+  const [repairMsg, setRepairMsg] = useState("");
+
+  const handleRepairRoles = async () => {
+    const confirmed = window.confirm(
+      "🔧 This will scan all user accounts and fix any that have the wrong role.\n\nFor example, teacher accounts that were incorrectly saved as 'student' will be corrected.\n\nContinue?"
+    );
+    if (!confirmed) return;
+    setRepairing(true);
+    setRepairMsg("");
+    try {
+      const usersSnap = await getDocs(collection(db, "users"));
+      let fixedTeachers = 0;
+      let fixedParents = 0;
+
+      for (const userDoc of usersSnap.docs) {
+        const data = userDoc.data();
+        // Only re-check docs that are currently "student" — might be wrong
+        if (data.role === "student" && data.email) {
+          // Check teachers collection
+          const teacherSnap = await getDocs(
+            query(collection(db, "teachers"), where("email", "==", data.email))
+          );
+          if (!teacherSnap.empty) {
+            await updateDoc(doc(db, "users", userDoc.id), { role: "teacher" });
+            fixedTeachers++;
+            continue;
+          }
+          // Check parents collection
+          const parentSnap = await getDocs(
+            query(collection(db, "parents"), where("email", "==", data.email))
+          );
+          if (!parentSnap.empty) {
+            await updateDoc(doc(db, "users", userDoc.id), { role: "parent" });
+            fixedParents++;
+          }
+        }
+      }
+
+      const parts = [];
+      if (fixedTeachers > 0) parts.push(`${fixedTeachers} teacher account${fixedTeachers > 1 ? "s" : ""}`);
+      if (fixedParents > 0) parts.push(`${fixedParents} parent account${fixedParents > 1 ? "s" : ""}`);
+      setRepairMsg(
+        parts.length > 0
+          ? `✓ Fixed: ${parts.join(", ")}. Affected users must log out and back in.`
+          : "✓ All roles are already correct — nothing to fix!"
+      );
+    } catch (err) {
+      console.error(err);
+      setRepairMsg("❌ Error occurred. Check console for details.");
+    } finally {
+      setRepairing(false);
+      setTimeout(() => setRepairMsg(""), 10000);
+    }
+  };
 
   const handleSeedLessons = async () => {
     setSeeding(true);
@@ -61,19 +118,31 @@ const AdminPage = () => {
           <div className="flex flex-wrap gap-3 mt-1">
             <button
               onClick={handleSeedLessons}
-              disabled={seeding}
+              disabled={seeding || repairing}
               className="bg-lamaYellow text-gray-800 px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60 hover:bg-yellow-300 transition-colors"
             >
               {seeding ? "Working..." : "📅 Seed Demo Lessons"}
             </button>
             <button
               onClick={handleResetAll}
-              disabled={seeding}
+              disabled={seeding || repairing}
               className="bg-red-100 text-red-700 border border-red-200 px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60 hover:bg-red-200 transition-colors"
             >
               {seeding ? "Working..." : "🔄 Reset & Seed All Data"}
             </button>
+            <button
+              onClick={handleRepairRoles}
+              disabled={seeding || repairing}
+              className="bg-blue-50 text-blue-700 border border-blue-200 px-4 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60 hover:bg-blue-100 transition-colors"
+            >
+              {repairing ? "Repairing..." : "🔧 Repair All Roles"}
+            </button>
           </div>
+          {repairMsg && (
+            <p className="text-xs font-medium text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg mt-1">
+              {repairMsg}
+            </p>
+          )}
           {seedMsg && (
             <p className="text-xs font-medium text-green-700 bg-green-50 px-3 py-1.5 rounded-lg mt-1">
               {seedMsg}

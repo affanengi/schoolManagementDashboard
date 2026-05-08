@@ -104,7 +104,7 @@ const SignInPage = () => {
         </form>
 
         <div className="mt-8 text-center text-sm text-gray-500">
-          Don't have an account? <Link href="/sign-up" className="text-lamaSky font-semibold hover:underline">Request Access</Link>
+          Don&apos;t have an account? <Link href="/sign-up" className="text-lamaSky font-semibold hover:underline">Request Access</Link>
         </div>
       </div>
     </div>

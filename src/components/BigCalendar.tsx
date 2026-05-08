@@ -101,7 +101,7 @@ const BigCalendar = ({ filterClass, filterTeacher }: { filterClass?: string; fil
     };
 
     fetchEvents();
-  }, [filterClass]);
+  }, [filterClass, filterTeacher]);
 
   const eventStyleGetter = (event: CalendarEvent) => {
     const isEvent = event.resource === "event";

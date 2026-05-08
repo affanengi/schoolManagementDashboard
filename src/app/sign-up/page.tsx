@@ -193,12 +193,12 @@ export default function SignUpPage() {
           </div>
           <h1 className="text-xl font-bold text-gray-800 mb-2">Account Pending</h1>
           <p className="text-gray-500 text-sm leading-relaxed mb-5">
-            Your account was created, but your email isn't linked to any student record yet.
+            Your account was created, but your email isn&apos;t linked to any student record yet.
           </p>
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-left">
             <p className="text-amber-800 text-xs font-semibold mb-1">📋 Contact your school admin and say:</p>
             <p className="text-amber-700 text-xs">
-              "Please link <strong>{pendingUser?.email}</strong> to my child's parent record in SchoolDash."
+              &quot;Please link <strong>{pendingUser?.email}</strong> to my child&apos;s parent record in SchoolDash.&quot;
             </p>
           </div>
           <Link

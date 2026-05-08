@@ -37,13 +37,24 @@ const AttendanceList = () => {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const [allData, setAllData] = useState<Attendance[]>([]);
-  const [childNames, setChildNames] = useState<string[] | null>(null); // null = not a parent / not loaded yet
+  const [childNames, setChildNames] = useState<string[] | null>(null);   // null = not a parent
+  const [teacherClasses, setTeacherClasses] = useState<string[] | null>(null); // null = not a teacher
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        // If parent — resolve child names first
+        // If teacher — resolve their classes
+        if (role === "teacher" && user?.email) {
+          const tSnap = await getDocs(query(collection(db, "teachers"), where("email", "==", user.email)));
+          if (!tSnap.empty) {
+            const classes: string[] = tSnap.docs[0].data().classes || [];
+            setTeacherClasses(classes);
+          } else {
+            setTeacherClasses([]);
+          }
+        }
+        // If parent — resolve child names
         if (role === "parent" && user?.email) {
           const pSnap = await getDocs(query(collection(db, "parents"), where("email", "==", user.email)));
           if (!pSnap.empty) {
@@ -63,6 +74,10 @@ const AttendanceList = () => {
 
   const { displayed, total } = useMemo(() => {
     let filtered = allData;
+    // Teacher: only records from their assigned classes
+    if (role === "teacher" && teacherClasses !== null) {
+      filtered = filtered.filter(a => teacherClasses.includes(a.class || ""));
+    }
     // Parent: only their child's records
     if (role === "parent" && childNames !== null) {
       filtered = filtered.filter(a => childNames.some(n => n.toLowerCase() === a.studentName?.toLowerCase()));
@@ -79,7 +94,7 @@ const AttendanceList = () => {
     );
     const total = filtered.length;
     return { displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE), total };
-  }, [allData, childNames, searchParam, page, sortOrder, role]);
+  }, [allData, childNames, teacherClasses, searchParam, page, sortOrder, role]);
 
   const renderRow = (item: Attendance) => (
     <tr key={item.id} className="border-b border-gray-200 even:bg-slate-50 text-sm hover:bg-lamaPurpleLight">
@@ -106,6 +121,11 @@ const AttendanceList = () => {
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
       <div className="flex items-center justify-between">
         <h1 className="hidden md:block text-lg font-semibold">Attendance Records</h1>
+          {role === "teacher" && teacherClasses !== null && teacherClasses.length > 0 && (
+            <p className="text-xs text-lamaSky font-medium mt-0.5">
+              Showing: Classes {teacherClasses.join(", ")}
+            </p>
+          )}
           {role === "parent" && childNames !== null && (
             <p className="text-xs text-lamaSky font-medium mt-0.5">
               Showing: {childNames.length > 0 ? childNames.join(" & ") + "'s attendance" : "No children linked"}

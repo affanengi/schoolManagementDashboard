@@ -272,10 +272,7 @@ const ProfilePage = () => {
       <div className="bg-white rounded-xl shadow-sm p-6 flex items-center gap-6">
         <div className="relative">
           <Image
-            src={
-              user.photoURL ||
-              "https://images.pexels.com/photos/2888150/pexels-photo-2888150.jpeg?auto=compress&cs=tinysrgb&w=200"
-            }
+            src={user.photoURL || "/avatar.png"}
             alt="Profile"
             width={90}
             height={90}

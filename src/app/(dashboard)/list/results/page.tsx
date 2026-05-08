@@ -46,8 +46,9 @@ const ResultList = () => {
   const filterRef = useRef<HTMLDivElement>(null);
 
   const [allData, setAllData] = useState<Result[]>([]);
-  const [teacherName, setTeacherName] = useState<string | null>(null);   // logged-in teacher's display name
-  const [teacherSubjects, setTeacherSubjects] = useState<string[]>([]);  // subjects this teacher teaches
+  const [teacherName, setTeacherName] = useState<string | null>(null);
+  const [teacherSubjects, setTeacherSubjects] = useState<string[]>([]);
+  const [parentChildNames, setParentChildNames] = useState<string[] | null>(null); // null = not parent
   const [loading, setLoading] = useState(true);
 
   // Close dropdown when clicking outside
@@ -71,6 +72,15 @@ const ResultList = () => {
             const data = snap.docs[0].data();
             setTeacherName(data.name || null);
             setTeacherSubjects(data.subjects || []);
+          }
+        }
+        if (role === "parent" && user?.email) {
+          const pSnap = await getDocs(query(collection(db, "parents"), where("email", "==", user.email)));
+          if (!pSnap.empty) {
+            const names: string[] = pSnap.docs[0].data().students || [];
+            setParentChildNames(names);
+          } else {
+            setParentChildNames([]);
           }
         }
         const snap = await getDocs(collection(db, "results"));
@@ -106,6 +116,10 @@ const ResultList = () => {
     else if (role === "teacher" && teacherName) {
       filtered = filtered.filter((r) => r.teacher === teacherName);
     }
+    // Parent role: only their child's results
+    else if (role === "parent" && parentChildNames !== null) {
+      filtered = filtered.filter((r) => parentChildNames.some(n => n.toLowerCase() === r.student.toLowerCase()));
+    }
 
     // Subject dropdown filter
     if (subjectFilter !== "all") {
@@ -133,7 +147,7 @@ const ResultList = () => {
       displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE),
       total: filtered.length,
     };
-  }, [allData, searchParam, teacherParam, studentParam, page, sortOrder, role, teacherName, teacherSubjects, subjectFilter]);
+  }, [allData, searchParam, teacherParam, studentParam, page, sortOrder, role, teacherName, teacherSubjects, subjectFilter, parentChildNames]);
 
   const scoreColor = (score: number) =>
     score >= 90 ? "text-green-600" : score >= 70 ? "text-blue-600" : score >= 50 ? "text-yellow-600" : "text-red-500";
@@ -167,6 +181,11 @@ const ResultList = () => {
             <p className="text-xs text-lamaSky font-medium mt-0.5">
               Showing: {teacherSubjects.join(" & ")}
               {subjectFilter !== "all" && ` › ${subjectFilter}`}
+            </p>
+          )}
+          {role === "parent" && parentChildNames !== null && parentChildNames.length > 0 && (
+            <p className="text-xs text-lamaSky font-medium mt-0.5">
+              Showing: {parentChildNames.join(" & ")}&apos;s Results
             </p>
           )}
         </div>

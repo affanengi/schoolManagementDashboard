@@ -33,6 +33,8 @@ const AssignmentList = () => {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [allData, setAllData] = useState<Assignment[]>([]);
   const [teacherName, setTeacherName] = useState<string | null>(null);
+  const [parentChildClass, setParentChildClass] = useState<string | null>(null); // child's class for parent
+  const [parentChildName, setParentChildName] = useState<string | null>(null);  // child's name for subtitle
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,6 +43,20 @@ const AssignmentList = () => {
         if (role === "teacher" && user?.email) {
           const snap = await getDocs(query(collection(db, "teachers"), where("email", "==", user.email)));
           if (!snap.empty) setTeacherName(snap.docs[0].data().name || null);
+        }
+        if (role === "parent" && user?.email) {
+          const pSnap = await getDocs(query(collection(db, "parents"), where("email", "==", user.email)));
+          if (!pSnap.empty) {
+            const childNames: string[] = pSnap.docs[0].data().students || [];
+            if (childNames.length > 0) {
+              // Fetch first child's class from students collection
+              const cSnap = await getDocs(query(collection(db, "students"), where("name", "in", childNames.slice(0, 10))));
+              if (!cSnap.empty) {
+                setParentChildClass(cSnap.docs[0].data().class || null);
+                setParentChildName(cSnap.docs[0].data().name || null);
+              }
+            }
+          }
         }
         const snap = await getDocs(collection(db, "assignments"));
         setAllData(snap.docs.map(d => ({ id: d.id, ...d.data() } as Assignment)));
@@ -61,6 +77,9 @@ const AssignmentList = () => {
       filtered = filtered.filter(a => a.class === classParam);
     } else if (role === "teacher" && teacherName) {
       filtered = filtered.filter(a => a.teacher === teacherName);
+    } else if (role === "parent" && parentChildClass) {
+      // Parent: only assignments for their child's class
+      filtered = filtered.filter(a => a.class === parentChildClass);
     }
     filtered = filtered.filter(a =>
       !searchParam ||
@@ -73,7 +92,7 @@ const AssignmentList = () => {
       sortOrder === "asc" ? a.dueDate.localeCompare(b.dueDate) : b.dueDate.localeCompare(a.dueDate)
     );
     return { displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE), total: filtered.length };
-  }, [allData, searchParam, teacherParam, classParam, page, sortOrder, role, teacherName]);
+  }, [allData, searchParam, teacherParam, classParam, page, sortOrder, role, teacherName, parentChildClass]);
 
   const renderRow = (item: Assignment) => (
     <tr key={item.id} className="border-b border-gray-200 even:bg-slate-50 text-sm hover:bg-lamaPurpleLight">
@@ -99,6 +118,9 @@ const AssignmentList = () => {
           <h1 className="hidden md:block text-lg font-semibold">All Assignments</h1>
           {role === "teacher" && teacherName && (
             <p className="text-xs text-lamaSky font-medium mt-0.5">Showing: Your Assignments</p>
+          )}
+          {role === "parent" && parentChildName && (
+            <p className="text-xs text-lamaSky font-medium mt-0.5">Showing: {parentChildName}&apos;s Assignments (Class {parentChildClass})</p>
           )}
         </div>
         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">

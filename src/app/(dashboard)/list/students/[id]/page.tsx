@@ -35,6 +35,7 @@ type Result = {
 };
 
 type TeacherInfo = { name: string; subjects: string[] };
+type AttendanceRecord = { id: string; status: "present" | "absent" | "late" };
 
 const scoreGrade = (s: number) =>
   s >= 90 ? "A+" : s >= 80 ? "A" : s >= 70 ? "B" : s >= 60 ? "C" : s >= 50 ? "D" : "F";
@@ -57,6 +58,7 @@ export default function SingleStudentPage() {
   const [student, setStudent] = useState<Student | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [teachers, setTeachers] = useState<TeacherInfo[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Access guard — admin + teacher only
@@ -90,6 +92,12 @@ export default function SingleStudentPage() {
           name: d.data().name as string,
           subjects: d.data().subjects as string[],
         })));
+
+        // Attendance for this student
+        const attSnap = await getDocs(
+          query(collection(db, "attendance"), where("studentName", "==", s.name))
+        );
+        setAttendance(attSnap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
     };
@@ -265,6 +273,87 @@ export default function SingleStudentPage() {
             <p className="text-sm">No results recorded for this student yet.</p>
           </div>
         )}
+
+        {/* Attendance Section */}
+        {(() => {
+          if (!attendance.length) return null;
+          const total = attendance.length;
+          const presentCount = attendance.filter(a => a.status === "present" || a.status === "late").length;
+          const rate = Math.round((presentCount / total) * 100);
+          const MIN = 75;
+          const isGood = rate >= MIN;
+          const isExcellent = rate >= 90;
+
+          // How many more classes needed to reach 75%?
+          // (MIN/100) = (presentCount + x) / (total + x) → solve for x
+          const classesNeeded = isGood ? 0 : Math.ceil((MIN * total - 100 * presentCount) / (100 - MIN));
+
+          const barColor   = isExcellent ? "bg-green-500" : isGood ? "bg-blue-500" : "bg-red-500";
+          const bgColor    = isExcellent ? "bg-green-50 border-green-200" : isGood ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200";
+          const textColor  = isExcellent ? "text-green-700" : isGood ? "text-blue-700" : "text-red-700";
+          const rateColor  = isExcellent ? "text-green-600" : isGood ? "text-blue-600" : "text-red-600";
+          const icon       = isExcellent ? "🟢" : isGood ? "🔵" : "🔴";
+          const statusMsg  = isExcellent
+            ? "Excellent attendance — keep it up!"
+            : isGood
+            ? "Good standing — above 75% minimum"
+            : `⚠️ Warning: below required 75% minimum`;
+
+          return (
+            <div className="bg-white rounded-2xl shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-bold text-gray-800">Attendance</h2>
+                <span className="text-xs text-gray-400">Jan – Apr 2026 · {total} school days</span>
+              </div>
+
+              {/* Rate + bar */}
+              <div className="flex items-center gap-4 mb-3">
+                <div className={`text-3xl font-black ${rateColor}`}>{rate}%</div>
+                <div className="flex-1">
+                  <div className="w-full bg-gray-100 rounded-full h-3 mb-1 relative overflow-hidden">
+                    {/* Min threshold marker */}
+                    <div className="absolute top-0 h-full border-l-2 border-dashed border-orange-400 z-10" style={{ left: `${MIN}%` }} />
+                    <div
+                      className={`h-3 rounded-full transition-all duration-700 ${barColor}`}
+                      style={{ width: `${rate}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>0%</span>
+                    <span className="text-orange-500 font-medium">75% min</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats row */}
+              <div className="flex gap-3 mb-3">
+                <div className="bg-gray-50 rounded-xl px-4 py-2 text-center flex-1">
+                  <p className="text-lg font-bold text-gray-800">{presentCount}</p>
+                  <p className="text-xs text-gray-500">Present</p>
+                </div>
+                <div className="bg-gray-50 rounded-xl px-4 py-2 text-center flex-1">
+                  <p className="text-lg font-bold text-gray-800">{total - presentCount}</p>
+                  <p className="text-xs text-gray-500">Absent</p>
+                </div>
+                <div className="bg-gray-50 rounded-xl px-4 py-2 text-center flex-1">
+                  <p className="text-lg font-bold text-gray-800">{total}</p>
+                  <p className="text-xs text-gray-500">Total Days</p>
+                </div>
+              </div>
+
+              {/* Status message */}
+              <div className={`rounded-xl border px-4 py-3 ${bgColor}`}>
+                <p className={`text-sm font-semibold ${textColor}`}>{icon} {statusMsg}</p>
+                {!isGood && classesNeeded > 0 && (
+                  <p className={`text-xs mt-1 ${textColor} opacity-80`}>
+                    Must attend <strong>{classesNeeded}</strong> more consecutive classes to reach 75%.
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Class Schedule */}
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col" style={{ minHeight: "900px" }}>

@@ -87,7 +87,7 @@ const AdminPage = () => {
     setSeedMsg("");
     const result = await resetAndSeedAllData();
     setSeedMsg(
-      `✓ Done! Seeded ${result.teachers} teachers, ${result.students} students, ${result.parents} parents, ${result.subjects} subjects, ${result.classes} classes, ${result.lessons} lessons, ${result.exams} exams, ${result.assignments} assignments, ${result.results} results, ${result.events} events, ${result.announcements} announcements. Refresh the page.`
+      `✓ Done! Seeded ${result.teachers} teachers, ${result.students} students, ${result.parents} parents, ${result.subjects} subjects, ${result.classes} classes, ${result.lessons} lessons, ${result.exams} exams, ${result.assignments} assignments, ${result.results} results, ${result.events} events, ${result.announcements} announcements, ${result.attendance} attendance records. Refresh the page.`
     );
     setSeeding(false);
     setTimeout(() => setSeedMsg(""), 8000);

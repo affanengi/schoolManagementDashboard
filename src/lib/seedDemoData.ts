@@ -459,6 +459,59 @@ const demoAnnouncements = [
   { id: "ann-science-fair",  title: "Science Fair Projects",  class: "5A",  date: "2026-06-19", description: "Science fair on July 5. Submit project abstracts by June 25." },
 ];
 
+// ── ATTENDANCE DATA — 30 records per student, Jan–Apr 2026 ─────────────────
+// Pre-set rates: Saffan 93%, Zaid 80%, Amaan 87%, Daniya 95%, Danish 67%, Neha 73%
+
+type AttendanceStatus = "present" | "absent" | "late";
+const makeRecords = (
+  studentName: string, studentId: string, cls: string,
+  presencePattern: AttendanceStatus[] // exactly 30 entries
+) =>
+  presencePattern.map((status, i) => ({
+    id: `att-${studentName.toLowerCase()}-${String(i + 1).padStart(2, "0")}`,
+    studentName,
+    studentId,
+    class: cls,
+    date: (() => {
+      // Spread dates Jan–Apr 2026 (≈ 7–8 per month)
+      const months = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3];
+      const days   = [6,10,13,15,17,20,24,27, 3, 7,10,14,17,21,24, 3, 6,10,13,17,20,24,27, 1, 6, 9,13,16,20,24];
+      const m = months[i]; const d = days[i];
+      return `2026-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    })(),
+    status,
+  }));
+
+const P: AttendanceStatus = "present";
+const A: AttendanceStatus = "absent";
+const L: AttendanceStatus = "late";
+
+const demoAttendance = [
+  // Saffan — 93% (28/30 present/late) ✅
+  ...makeRecords("Saffan", "2345678", "5A",
+    [P,P,P,P,P,P,P,P, P,P,P,P,P,P,P, P,P,P,P,P,P,P,P, L,P,P,A,P,P,A]),
+
+  // Zaid — 80% (24/30 present/late) ✅
+  ...makeRecords("Zaid", "2345687", "4B",
+    [P,P,P,A,P,P,P,A, P,P,A,P,P,P,A, P,P,P,A,P,P,A,P, P,P,A,P,P,A,P]),
+
+  // Amaan — 87% (26/30 present/late) ✅
+  ...makeRecords("Amaan", "2345768", "3A",
+    [P,P,P,P,P,P,A,P, P,P,P,P,A,P,P, P,P,P,P,A,P,P,P, P,L,P,P,A,P,P]),
+
+  // Daniya — 95% (28/30 present, 1 late) ✅
+  ...makeRecords("Daniya", "2346578", "6A",
+    [P,P,P,P,P,P,P,P, P,P,P,P,P,L,P, P,P,P,P,P,P,P,P, P,P,P,A,P,P,A]),
+
+  // Danish — 67% (20/30 present/late) ⚠️ BELOW 75%
+  ...makeRecords("Danish", "2354678", "2B",
+    [P,A,P,A,P,P,A,A, P,P,A,P,A,P,A, P,A,P,P,A,P,A,P, A,P,A,P,P,A,P]),
+
+  // Neha — 73% (22/30 present/late) ⚠️ BELOW 75%
+  ...makeRecords("Neha", "3245678", "1A",
+    [P,P,A,P,P,A,P,A, P,P,A,P,P,A,P, A,P,P,A,P,A,P,P, A,P,P,A,P,P,A]),
+];
+
 // ── PUBLIC EXPORTS ─────────────────────────────────────────────────────────
 
 export async function seedDemoLessons() {
@@ -481,7 +534,8 @@ export async function resetAndSeedAllData(): Promise<{
   results: number;
   events: number;
   announcements: number;
-}> {
+  attendance: number;
+}>  {
   // Step 1 — Clear ALL stale collections
   await Promise.all([
     clearCollection("teachers"),
@@ -495,6 +549,7 @@ export async function resetAndSeedAllData(): Promise<{
     clearCollection("results"),
     clearCollection("events"),
     clearCollection("announcements"),
+    clearCollection("attendance"),
   ]);
 
   // Step 2 — Seed teachers
@@ -560,6 +615,12 @@ export async function resetAndSeedAllData(): Promise<{
     await setDoc(doc(db, "announcements", id), { ...data, createdAt: new Date() });
   }
 
+  // Step 13 — Seed attendance
+  for (const a of demoAttendance) {
+    const { id, ...data } = a;
+    await setDoc(doc(db, "attendance", id), { ...data, createdAt: new Date() });
+  }
+
   return {
     teachers: teachers.length,
     students: students.length,
@@ -572,5 +633,6 @@ export async function resetAndSeedAllData(): Promise<{
     results: demoResults.length,
     events: demoEvents.length,
     announcements: demoAnnouncements.length,
+    attendance: demoAttendance.length,
   };
 }

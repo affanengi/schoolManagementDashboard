@@ -35,9 +35,9 @@ export default function SingleTeacherPage() {
   const [lessonCount, setLessonCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Admin-only guard
+  // Admin + Teacher can view; everyone else gets redirected
   useEffect(() => {
-    if (!loading && role && role !== "admin") {
+    if (!loading && role && role !== "admin" && role !== "teacher") {
       router.replace("/dashboard");
     }
   }, [role, loading, router]);

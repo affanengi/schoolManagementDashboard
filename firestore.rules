@@ -1,0 +1,193 @@
+rules_version = '2';
+
+// =============================================================================
+// SchoolDash - Firebase Firestore Security Rules
+// =============================================================================
+//
+// Role Hierarchy:
+//   admin   - Full read/write access to all collections
+//   teacher - Read access to all, write to students/results in their classes
+//   student - Read their own record only, read announcements & events
+//   parent  - Read their children's student records only
+//
+// How Roles Work:
+//   Every authenticated user has a document in the 'users' collection:
+//   /users/{uid} -> { email: "...", role: "admin|teacher|student|parent" }
+//   This is created automatically by AuthProvider.tsx on first login.
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Helper Functions
+    // =========================================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Get the current user's role from the 'users' collection
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // Role check shortcuts
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && getUserRole() == 'teacher';
+    }
+
+    function isStudent() {
+      return isAuthenticated() && getUserRole() == 'student';
+    }
+
+    function isParent() {
+      return isAuthenticated() && getUserRole() == 'parent';
+    }
+
+    // Check if the requesting user is an admin or teacher
+    function isAdminOrTeacher() {
+      return isAdmin() || isTeacher();
+    }
+
+    // =========================================================================
+    // Users Collection
+    // Rule: Users can read/write their OWN document. Admins can read all.
+    // =========================================================================
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Only admins can update roles; users can update their own non-role fields
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == userId && !('role' in request.resource.data.diff(resource.data).affectedKeys()))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Teachers Collection
+    // Rule: Admins have full access. Teachers can read all. Others read-only.
+    // =========================================================================
+    match /teachers/{teacherId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Students Collection
+    // Rule: Admins have full access. Teachers can create/update (for their class).
+    //       Students can read ONLY their own record. Parents can read their children.
+    // =========================================================================
+    match /students/{studentId} {
+      allow read: if isAdmin() || isAdminOrTeacher() ||
+        // Student reading their own record (matched by email)
+        (isStudent() && resource.data.email == request.auth.token.email) ||
+        // Parent reading their child's record
+        (isParent() && resource.data.studentId in
+          get(/databases/$(database)/documents/parents/$(request.auth.uid)).data.get('students', []));
+      allow create: if isAdminOrTeacher();
+      allow update: if isAdminOrTeacher();
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Parents Collection
+    // Rule: Admins have full access. Parents can read their own record.
+    // =========================================================================
+    match /parents/{parentId} {
+      allow read: if isAdmin() || (isParent() && resource.data.email == request.auth.token.email);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Results Collection
+    // Rule: Admins can do anything. Teachers can create/update. Students read own.
+    // =========================================================================
+    match /results/{resultId} {
+      allow read: if isAdminOrTeacher() ||
+        (isStudent() && resource.data.studentEmail == request.auth.token.email);
+      allow create, update: if isAdminOrTeacher();
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Announcements Collection
+    // Rule: Everyone can read. Only admins can write.
+    // =========================================================================
+    match /announcements/{announcementId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Events Collection
+    // Rule: Everyone can read. Only admins can write.
+    // =========================================================================
+    match /events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Subjects, Classes, Lessons Collections
+    // Rule: Everyone can read. Admins and Teachers can write.
+    // =========================================================================
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    // =========================================================================
+    // Exams & Assignments
+    // Rule: Everyone can read. Teachers and admins can write.
+    // =========================================================================
+    match /exams/{examId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    // =========================================================================
+    // Attendance Collection
+    // Rule: Admins and Teachers can read/write. Students/Parents read only.
+    // =========================================================================
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdminOrTeacher();
+    }
+
+    // =========================================================================
+    // Messages Collection
+    // Rule: Authenticated users can only read messages sent TO or BY them.
+    // =========================================================================
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -27,6 +27,8 @@ const ExamList = () => {
   const searchParams = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1");
   const searchParam = searchParams.get("search") || "";
+  const teacherParam = searchParams.get("teacher") || ""; // from student profile shortcut
+  const classParam = searchParams.get("class") || "";   // from student profile shortcut
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [allData, setAllData] = useState<Exam[]>([]);
   const [teacherName, setTeacherName] = useState<string | null>(null);
@@ -49,7 +51,16 @@ const ExamList = () => {
 
   const { displayed, total } = useMemo(() => {
     let filtered = allData;
-    if (role === "teacher" && teacherName) filtered = filtered.filter(e => e.teacher === teacherName);
+    // teacher+class from student profile shortcut (e.g., ?teacher=Affan&class=5A)
+    if (teacherParam && classParam) {
+      filtered = filtered.filter(e => e.teacher === teacherParam && e.class === classParam);
+    } else if (teacherParam) {
+      filtered = filtered.filter(e => e.teacher === teacherParam);
+    } else if (classParam) {
+      filtered = filtered.filter(e => e.class === classParam);
+    } else if (role === "teacher" && teacherName) {
+      filtered = filtered.filter(e => e.teacher === teacherName);
+    }
     filtered = filtered.filter(e =>
       !searchParam ||
       e.subject.toLowerCase().includes(searchParam.toLowerCase()) ||
@@ -60,7 +71,7 @@ const ExamList = () => {
       sortOrder === "asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)
     );
     return { displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE), total: filtered.length };
-  }, [allData, searchParam, page, sortOrder, role, teacherName]);
+  }, [allData, searchParam, teacherParam, classParam, page, sortOrder, role, teacherName]);
 
   const renderRow = (item: Exam) => (
     <tr key={item.id} className="border-b border-gray-200 even:bg-slate-50 text-sm hover:bg-lamaPurpleLight">

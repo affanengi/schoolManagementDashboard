@@ -28,6 +28,8 @@ const AssignmentList = () => {
   const searchParams = useSearchParams();
   const page = parseInt(searchParams.get("page") || "1");
   const searchParam = searchParams.get("search") || "";
+  const teacherParam = searchParams.get("teacher") || ""; // from student profile shortcut (teacher viewing)
+  const classParam = searchParams.get("class") || "";   // from student profile shortcut
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [allData, setAllData] = useState<Assignment[]>([]);
   const [teacherName, setTeacherName] = useState<string | null>(null);
@@ -50,7 +52,16 @@ const AssignmentList = () => {
 
   const { displayed, total } = useMemo(() => {
     let filtered = allData;
-    if (role === "teacher" && teacherName) filtered = filtered.filter(a => a.teacher === teacherName);
+    // teacher+class from student profile shortcut (e.g., ?teacher=Affan&class=5A)
+    if (teacherParam && classParam) {
+      filtered = filtered.filter(a => a.teacher === teacherParam && a.class === classParam);
+    } else if (teacherParam) {
+      filtered = filtered.filter(a => a.teacher === teacherParam);
+    } else if (classParam) {
+      filtered = filtered.filter(a => a.class === classParam);
+    } else if (role === "teacher" && teacherName) {
+      filtered = filtered.filter(a => a.teacher === teacherName);
+    }
     filtered = filtered.filter(a =>
       !searchParam ||
       a.title?.toLowerCase().includes(searchParam.toLowerCase()) ||
@@ -62,7 +73,7 @@ const AssignmentList = () => {
       sortOrder === "asc" ? a.dueDate.localeCompare(b.dueDate) : b.dueDate.localeCompare(a.dueDate)
     );
     return { displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE), total: filtered.length };
-  }, [allData, searchParam, page, sortOrder, role, teacherName]);
+  }, [allData, searchParam, teacherParam, classParam, page, sortOrder, role, teacherName]);
 
   const renderRow = (item: Assignment) => (
     <tr key={item.id} className="border-b border-gray-200 even:bg-slate-50 text-sm hover:bg-lamaPurpleLight">

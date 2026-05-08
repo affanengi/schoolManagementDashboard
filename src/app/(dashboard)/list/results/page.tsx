@@ -39,6 +39,7 @@ const ResultList = () => {
   const page = parseInt(searchParams.get("page") || "1");
   const searchParam = searchParams.get("search") || "";
   const teacherParam = searchParams.get("teacher") || ""; // from teacher detail shortcut
+  const studentParam = searchParams.get("student") || ""; // from student detail shortcut
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [subjectFilter, setSubjectFilter] = useState<string>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -93,16 +94,20 @@ const ResultList = () => {
   const { displayed, total } = useMemo(() => {
     let filtered = allData;
 
-    // If admin clicked a shortcut from teacher detail page (?teacher=Name), filter by that teacher
+    // Exact teacher filter — from teacher detail shortcut (?teacher=Name)
     if (teacherParam) {
       filtered = filtered.filter((r) => r.teacher === teacherParam);
+    }
+    // Exact student filter — from student detail shortcut (?student=Name)
+    else if (studentParam) {
+      filtered = filtered.filter((r) => r.student === studentParam);
     }
     // Teacher role: always filter to their own results only
     else if (role === "teacher" && teacherName) {
       filtered = filtered.filter((r) => r.teacher === teacherName);
     }
 
-    // Subject filter (dropdown selection)
+    // Subject dropdown filter
     if (subjectFilter !== "all") {
       if (role === "teacher" && !teacherSubjects.includes(subjectFilter)) {
         filtered = [];
@@ -111,7 +116,7 @@ const ResultList = () => {
       }
     }
 
-    // Search filter — includes teacher field so searching teacher name works
+    // Search filter — includes teacher field
     filtered = filtered.filter((r) =>
       !searchParam ||
       r.student.toLowerCase().includes(searchParam.toLowerCase()) ||
@@ -120,7 +125,6 @@ const ResultList = () => {
       r.teacher?.toLowerCase().includes(searchParam.toLowerCase())
     );
 
-    // Sort by score
     filtered = [...filtered].sort((a, b) =>
       sortOrder === "asc" ? a.score - b.score : b.score - a.score
     );
@@ -129,7 +133,7 @@ const ResultList = () => {
       displayed: filtered.slice((page - 1) * ITEM_PER_PAGE, page * ITEM_PER_PAGE),
       total: filtered.length,
     };
-  }, [allData, searchParam, teacherParam, page, sortOrder, role, teacherName, teacherSubjects, subjectFilter]);
+  }, [allData, searchParam, teacherParam, studentParam, page, sortOrder, role, teacherName, teacherSubjects, subjectFilter]);
 
   const scoreColor = (score: number) =>
     score >= 90 ? "text-green-600" : score >= 70 ? "text-blue-600" : score >= 50 ? "text-yellow-600" : "text-red-500";

@@ -168,7 +168,7 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent | React.KeyboardEvent) => {
     e?.preventDefault();
     if (!newMessage.trim() || !selectedChatData || !user?.email) return;
 
@@ -178,8 +178,8 @@ export default function MessagesPage() {
     const contact = selectedChatData.contact;
 
     try {
-      // Deterministic ID so both users hit the same doc
-      const convId = [user.email, contact.email].sort().join("_");
+      // Use existing conversation ID if available, otherwise fallback to deterministic ID
+      const convId = selectedChatData.conversation?.id || [user.email, contact.email].sort().join("_");
       
       // Ensure conversation exists
       const convRef = doc(db, "conversations", convId);
@@ -214,9 +214,11 @@ export default function MessagesPage() {
   };
 
   // Determine available filters
-  const filters = ["All", "Admin", "Teachers"];
-  if (currentRole === "admin" || currentRole === "teacher") {
-    filters.push("Students", "Parents");
+  let filters = ["All", "Admin", "Teachers"];
+  if (currentRole === "admin") {
+    filters = ["All", "Teachers", "Students", "Parents"];
+  } else if (currentRole === "teacher") {
+    filters = ["All", "Admin", "Teachers", "Students", "Parents"];
   }
 
   return (
@@ -401,28 +403,34 @@ export default function MessagesPage() {
               <div className="p-4 bg-white border-t border-gray-200 shrink-0">
                 <form 
                   onSubmit={handleSendMessage}
-                  className="flex items-center gap-2 bg-gray-50 p-2 rounded-full border border-gray-200"
+                  className="flex items-end gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200"
                 >
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0">
                     📎
                   </button>
-                  <input 
-                    type="text" 
+                  <textarea 
                     placeholder="Type a message..." 
-                    className="flex-1 bg-transparent outline-none text-sm px-2"
+                    className="flex-1 bg-transparent outline-none text-sm px-2 resize-none py-2 scrollbar-hide max-h-[120px]"
+                    rows={Math.max(1, Math.min(5, newMessage.split('\n').length))}
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(e);
+                      }
+                    }}
                   />
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
                     😀
                   </button>
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
                     🎤
                   </button>
                   <button 
                     type="submit" 
                     disabled={!newMessage.trim()}
-                    className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0 mb-1"
                   >
                     ➤
                   </button>

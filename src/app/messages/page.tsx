@@ -394,7 +394,7 @@ export default function MessagesPage() {
                           </div>
                         )}
                         <div>
-                          <div className={`p-3 rounded-2xl shadow-sm text-sm ${isMe ? "bg-lamaSky text-white rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
+                          <div className={`p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${isMe ? "bg-lamaSky text-gray-800 rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
                             {msg.text}
                           </div>
                           <span className={`text-[10px] text-gray-400 mt-1 block ${isMe ? "text-right mr-1" : "ml-1"}`}>

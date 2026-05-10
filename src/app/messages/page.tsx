@@ -3,25 +3,88 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDocs, setDoc } from "firebase/firestore";
 import { Conversation, Message } from "@/types/chat";
+
+type Contact = {
+  email: string;
+  name: string;
+  avatar: string;
+  role: "admin" | "teacher" | "student" | "parent";
+};
+
+const ADMIN_CONTACT: Contact = {
+  email: "mohammedaffanrazvi604@gmail.com",
+  name: "Mohammed Affan Razvi",
+  avatar: "/avatar.png",
+  role: "admin"
+};
 
 export default function MessagesPage() {
   const { user, role } = useAuth();
   const currentRole = role || "student";
   
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  
+  const [selectedContactEmail, setSelectedContactEmail] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string>("All");
+  const [searchQuery, setSearchQuery] = useState("");
   const [newMessage, setNewMessage] = useState("");
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const selectedConversation = conversations.find(c => c.id === selectedConversationId) || null;
   const homeLink = `/dashboard/${currentRole}`;
 
-  // Fetch Conversations
+  // 1. Fetch Contacts based on Role
+  useEffect(() => {
+    if (!user?.email) return;
+
+    const fetchContacts = async () => {
+      let fetchedContacts: Contact[] = [];
+      
+      // Admin is always available to talk to (except to themselves)
+      if (user.email !== ADMIN_CONTACT.email) {
+        fetchedContacts.push(ADMIN_CONTACT);
+      }
+
+      // Helper to fetch and map a collection
+      const fetchRole = async (colName: string, roleName: Contact['role']) => {
+        const snap = await getDocs(collection(db, colName));
+        const items = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            email: data.email,
+            name: data.name || data.username || "Unknown",
+            avatar: data.photo || "/avatar.png",
+            role: roleName
+          };
+        }).filter(c => c.email && c.email !== user.email); // Don't chat with self
+        return items;
+      };
+
+      if (currentRole === "admin" || currentRole === "teacher") {
+        const [teachers, students, parents] = await Promise.all([
+          fetchRole("teachers", "teacher"),
+          fetchRole("students", "student"),
+          fetchRole("parents", "parent"),
+        ]);
+        fetchedContacts = [...fetchedContacts, ...teachers, ...students, ...parents];
+      } else if (currentRole === "student" || currentRole === "parent") {
+        const teachers = await fetchRole("teachers", "teacher");
+        fetchedContacts = [...fetchedContacts, ...teachers];
+      }
+
+      setContacts(fetchedContacts);
+    };
+
+    fetchContacts();
+  }, [user?.email, currentRole]);
+
+  // 2. Fetch Active Conversations
   useEffect(() => {
     if (!user?.email) return;
 
@@ -35,23 +98,53 @@ export default function MessagesPage() {
         id: doc.id,
         ...doc.data()
       })) as Conversation[];
-      
-      // Sort by lastMessageTime descending
-      convos.sort((a, b) => {
-        const timeA = a.lastMessageTime?.toMillis?.() || 0;
-        const timeB = b.lastMessageTime?.toMillis?.() || 0;
-        return timeB - timeA;
-      });
-
       setConversations(convos);
     });
 
     return () => unsubscribe();
   }, [user?.email]);
 
-  // Fetch Messages for selected conversation
+  // 3. Merge Contacts and Conversations for the UI
+  const chatList = useMemo(() => {
+    let list = contacts.map(contact => {
+      // Find if a conversation exists with this contact
+      const conv = conversations.find(c => c.participants.includes(contact.email));
+      return {
+        contact,
+        conversation: conv
+      };
+    });
+
+    // Apply Filter
+    if (activeFilter !== "All") {
+      list = list.filter(item => item.contact.role.toLowerCase() === activeFilter.toLowerCase().replace(/s$/, ""));
+    }
+
+    // Apply Search
+    if (searchQuery.trim() !== "") {
+      list = list.filter(item => item.contact.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    }
+
+    // Sort by lastMessageTime if conversation exists, otherwise put at bottom
+    list.sort((a, b) => {
+      const timeA = a.conversation?.lastMessageTime?.toMillis?.() || 0;
+      const timeB = b.conversation?.lastMessageTime?.toMillis?.() || 0;
+      return timeB - timeA; // Descending
+    });
+
+    return list;
+  }, [contacts, conversations, activeFilter, searchQuery]);
+
+  // Determine currently selected Chat Data
+  const selectedChatData = chatList.find(c => c.contact.email === selectedContactEmail);
+  const selectedConversationId = selectedChatData?.conversation?.id;
+
+  // 4. Fetch Messages for selected conversation
   useEffect(() => {
-    if (!selectedConversationId) return;
+    if (!selectedConversationId) {
+      setMessages([]);
+      return;
+    }
 
     const q = query(
       collection(db, "messages"),
@@ -77,32 +170,41 @@ export default function MessagesPage() {
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !selectedConversation || !user?.email) return;
+    if (!newMessage.trim() || !selectedChatData || !user?.email) return;
 
     const messageText = newMessage.trim();
     setNewMessage(""); // Optimistic UI clear
+    
+    const contact = selectedChatData.contact;
 
     try {
+      // Deterministic ID so both users hit the same doc
+      const convId = [user.email, contact.email].sort().join("_");
+      
+      // Ensure conversation exists
+      const convRef = doc(db, "conversations", convId);
+      await setDoc(convRef, {
+        participants: [user.email, contact.email],
+        participantDetails: [
+          { email: user.email, name: user.displayName || user.email.split('@')[0], avatar: user.photoURL || "/avatar.png", role: currentRole },
+          { email: contact.email, name: contact.name, avatar: contact.avatar, role: contact.role }
+        ],
+        lastMessage: messageText,
+        lastMessageTime: serverTimestamp(),
+        // unreadCount handling can be added in Phase 6
+      }, { merge: true });
+
+      // Add message
       await addDoc(collection(db, "messages"), {
-        conversationId: selectedConversation.id,
+        conversationId: convId,
         senderId: user.email,
         text: messageText,
         createdAt: serverTimestamp(),
       });
 
-      // Update conversation's last message
-      await updateDoc(doc(db, "conversations", selectedConversation.id), {
-        lastMessage: messageText,
-        lastMessageTime: serverTimestamp(),
-      });
     } catch (error) {
       console.error("Error sending message:", error);
     }
-  };
-
-  const getOtherParticipant = (conv: Conversation) => {
-    if (!user?.email) return null;
-    return conv.participantDetails.find(p => p.email !== user.email) || conv.participantDetails[0];
   };
 
   const formatTime = (timestamp: any) => {
@@ -110,6 +212,12 @@ export default function MessagesPage() {
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  // Determine available filters
+  const filters = ["All", "Admin", "Teachers"];
+  if (currentRole === "admin" || currentRole === "teacher") {
+    filters.push("Students", "Parents");
+  }
 
   return (
     <div className="h-screen w-full flex flex-col bg-gray-50 overflow-hidden">
@@ -136,59 +244,80 @@ export default function MessagesPage() {
 
       {/* 2. Main 2-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Column: Conversation List */}
-        <div className={`w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col ${selectedConversation ? 'hidden md:flex' : 'flex'}`}>
-          {/* Header & New Chat Button */}
-          <div className="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
-            <h2 className="font-semibold text-lg">Messages</h2>
-            <button className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors shadow-sm">
-              <span className="text-xl leading-none mb-1">+</span>
-            </button>
+        {/* Left Column: Conversation/Contact List */}
+        <div className={`w-full md:w-1/3 lg:w-1/4 bg-white border-r border-gray-200 flex flex-col ${selectedContactEmail ? 'hidden md:flex' : 'flex'}`}>
+          {/* Header */}
+          <div className="p-4 border-b border-gray-100 shrink-0">
+            <h2 className="font-semibold text-lg mb-3">Directory Chats</h2>
+            
+            {/* Filters */}
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {filters.map(f => (
+                <button 
+                  key={f}
+                  onClick={() => setActiveFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                    activeFilter === f 
+                      ? "bg-lamaSky text-white" 
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
           </div>
           
           {/* Search Bar */}
-          <div className="p-3 shrink-0">
+          <div className="p-3 shrink-0 border-b border-gray-100">
             <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-2">
               <Image src="/search.png" alt="" width={14} height={14} className="opacity-50" />
               <input 
                 type="text" 
-                placeholder="Search chats..." 
+                placeholder="Search name..." 
                 className="bg-transparent outline-none text-sm w-full"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
           </div>
 
-          {/* List of Chats */}
+          {/* List of Contacts/Chats */}
           <div className="flex-1 overflow-y-auto">
-            {conversations.length === 0 ? (
+            {chatList.length === 0 ? (
               <div className="text-center text-gray-400 p-4 text-sm mt-4 flex flex-col items-center">
                 <Image src="/message.png" alt="" width={32} height={32} className="opacity-30 mb-2" />
-                No active conversations yet.
+                No contacts found.
               </div>
             ) : (
-              conversations.map(conv => {
-                const other = getOtherParticipant(conv);
-                const isSelected = selectedConversation?.id === conv.id;
-                const unreadCount = conv.unreadCount?.[user?.email || ""] || 0;
+              chatList.map(({ contact, conversation }) => {
+                const isSelected = selectedContactEmail === contact.email;
+                const unreadCount = conversation?.unreadCount?.[user?.email || ""] || 0;
 
                 return (
                   <div 
-                    key={conv.id}
-                    onClick={() => setSelectedConversationId(conv.id)}
-                    className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                    key={contact.email}
+                    onClick={() => setSelectedContactEmail(contact.email)}
+                    className={`flex items-center gap-3 p-3 cursor-pointer transition-colors border-b border-gray-50 ${isSelected ? "bg-blue-50" : "hover:bg-gray-50"}`}
                   >
-                    <Image src={other?.avatar || "/avatar.png"} alt="" width={40} height={40} className="rounded-full object-cover w-[40px] h-[40px]" />
+                    <Image src={contact.avatar} alt="" width={40} height={40} className="rounded-full object-cover w-[40px] h-[40px]" />
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-1">
-                        <h3 className="font-medium text-sm truncate">{other?.name || "Unknown"}</h3>
-                        <span className="text-[10px] text-gray-400">{formatTime(conv.lastMessageTime)}</span>
+                        <h3 className="font-medium text-sm truncate">{contact.name}</h3>
+                        <span className="text-[10px] text-gray-400">{formatTime(conversation?.lastMessageTime)}</span>
                       </div>
-                      <p className={`text-xs truncate ${unreadCount > 0 ? "text-gray-800 font-semibold" : "text-gray-500"}`}>
-                        {conv.lastMessage || "No messages yet"}
-                      </p>
+                      <div className="flex justify-between items-center">
+                        <p className={`text-xs truncate ${unreadCount > 0 ? "text-gray-800 font-semibold" : "text-gray-500"}`}>
+                          {conversation?.lastMessage || <span className="italic opacity-60">Start a chat</span>}
+                        </p>
+                        {/* Role Badge */}
+                        <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded uppercase tracking-wider ml-2 shrink-0">
+                          {contact.role}
+                        </span>
+                      </div>
                     </div>
                     {unreadCount > 0 && (
-                      <div className="w-4 h-4 bg-lamaPurple rounded-full flex items-center justify-center text-white text-[10px]">
+                      <div className="w-4 h-4 bg-lamaPurple rounded-full flex items-center justify-center text-white text-[10px] shrink-0">
                         {unreadCount}
                       </div>
                     )}
@@ -200,22 +329,22 @@ export default function MessagesPage() {
         </div>
 
         {/* Right Column: Chat Window */}
-        <div className={`flex-1 flex flex-col bg-[#F7F8FA] ${!selectedConversation ? 'hidden md:flex' : 'flex'}`}>
-          {selectedConversation ? (
+        <div className={`flex-1 flex flex-col bg-[#F7F8FA] ${!selectedContactEmail ? 'hidden md:flex' : 'flex'}`}>
+          {selectedChatData ? (
             <>
               {/* Chat Header */}
               <div className="h-16 border-b border-gray-200 bg-white flex items-center px-4 justify-between shrink-0 shadow-sm z-10">
                 <div className="flex items-center gap-3">
                   <button 
                     className="md:hidden mr-2 p-1 text-gray-500"
-                    onClick={() => setSelectedConversationId(null)}
+                    onClick={() => setSelectedContactEmail(null)}
                   >
                     ←
                   </button>
-                  <Image src={getOtherParticipant(selectedConversation)?.avatar || "/avatar.png"} alt="" width={36} height={36} className="rounded-full object-cover w-[36px] h-[36px]" />
+                  <Image src={selectedChatData.contact.avatar} alt="" width={36} height={36} className="rounded-full object-cover w-[36px] h-[36px]" />
                   <div>
-                    <h3 className="font-semibold text-sm">{getOtherParticipant(selectedConversation)?.name || "Unknown"}</h3>
-                    <span className="text-xs text-gray-500 capitalize">{getOtherParticipant(selectedConversation)?.role || "User"}</span>
+                    <h3 className="font-semibold text-sm">{selectedChatData.contact.name}</h3>
+                    <span className="text-xs text-gray-500 capitalize">{selectedChatData.contact.role}</span>
                   </div>
                 </div>
                 <button className="text-gray-400 hover:text-gray-600">
@@ -226,22 +355,32 @@ export default function MessagesPage() {
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
                 {messages.length === 0 ? (
-                  <div className="text-center text-gray-400 p-4 text-sm mt-4">
-                    Send a message to start the chat.
+                  <div className="flex-1 flex flex-col items-center justify-center text-gray-400 text-sm mt-4">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
+                      <Image src={selectedChatData.contact.avatar} alt="" width={48} height={48} className="rounded-full object-cover w-[48px] h-[48px]" />
+                    </div>
+                    Say hello to {selectedChatData.contact.name}!
                   </div>
                 ) : (
-                  messages.map(msg => {
+                  messages.map((msg, idx) => {
                     const isMe = msg.senderId === user?.email;
+                    // Show avatar if it's the last message in a sequence from the other person
+                    const showAvatar = !isMe && (idx === messages.length - 1 || messages[idx + 1].senderId !== msg.senderId);
+                    
                     return (
                       <div key={msg.id} className={`flex max-w-[80%] gap-2 ${isMe ? "self-end" : "self-start"}`}>
                         {!isMe && (
-                          <Image 
-                            src={getOtherParticipant(selectedConversation)?.avatar || "/avatar.png"} 
-                            alt="" 
-                            width={28} 
-                            height={28} 
-                            className="rounded-full self-end object-cover w-[28px] h-[28px]" 
-                          />
+                          <div className="w-[28px] shrink-0 flex flex-col justify-end">
+                            {showAvatar && (
+                              <Image 
+                                src={selectedChatData.contact.avatar} 
+                                alt="" 
+                                width={28} 
+                                height={28} 
+                                className="rounded-full object-cover w-[28px] h-[28px]" 
+                              />
+                            )}
+                          </div>
                         )}
                         <div>
                           <div className={`p-3 rounded-2xl shadow-sm text-sm ${isMe ? "bg-lamaSky text-white rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
@@ -292,11 +431,11 @@ export default function MessagesPage() {
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4 shadow-sm">
                 <Image src="/message.png" alt="" width={40} height={40} className="opacity-50" />
               </div>
-              <p className="text-lg font-medium text-gray-500">Your Messages</p>
-              <p className="text-sm">Select a conversation to start chatting</p>
+              <p className="text-lg font-medium text-gray-500">Your Directory</p>
+              <p className="text-sm">Select a contact to start chatting</p>
             </div>
           )}
         </div>

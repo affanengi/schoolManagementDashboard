@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 import { Conversation, Message } from "@/types/chat";
+import EmojiPicker, { EmojiClickData } from "emoji-picker-react";
 
 type Contact = {
   email: string;
@@ -155,6 +156,8 @@ export default function MessagesPage() {
   const [deleteModalMsg, setDeleteModalMsg] = useState<Message | null>(null);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewCaption, setPreviewCaption] = useState("");
+  
+  const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
   
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -377,6 +380,39 @@ export default function MessagesPage() {
     setDeleteModalMsg(null);
   };
 
+  const handleReaction = async (messageId: string, emoji: string) => {
+    if (!user?.email) return;
+    const msgRef = doc(db, "messages", messageId);
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return;
+
+    const currentReactions = msg.reactions || {};
+    const reactorsForEmoji = currentReactions[emoji] || [];
+
+    let newReactors;
+    if (reactorsForEmoji.includes(user.email)) {
+      // Remove reaction
+      newReactors = reactorsForEmoji.filter(e => e !== user.email);
+    } else {
+      // Add reaction
+      newReactors = [...reactorsForEmoji, user.email];
+    }
+
+    const newReactions = { ...currentReactions };
+    if (newReactors.length === 0) {
+      delete newReactions[emoji];
+    } else {
+      newReactions[emoji] = newReactors;
+    }
+
+    try {
+      await updateDoc(msgRef, { reactions: newReactions });
+    } catch (error) {
+      console.error("Error updating reaction:", error);
+    }
+    
+    setActiveReactionMessageId(null);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -817,6 +853,17 @@ export default function MessagesPage() {
                     return (
                       <div key={msg.id} className={`group flex max-w-[80%] gap-2 relative ${isMe ? "self-end" : "self-start"}`}>
                         
+                        {/* Reaction Button for my message */}
+                        {isMe && !msg.deletedForEveryone && (
+                          <button 
+                            onClick={() => setActiveReactionMessageId(msg.id)}
+                            className="absolute -left-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-gray-600 transition-opacity"
+                            title="React"
+                          >
+                            😊
+                          </button>
+                        )}
+
                         {/* Delete Button for my message */}
                         {isMe && !msg.deletedForEveryone && (
                           <button 
@@ -870,6 +917,26 @@ export default function MessagesPage() {
                             {formatTime(msg.createdAt)}
                             {isMe && !msg.deletedForEveryone && <DoubleTickIcon isRead={!!msg.seen} />}
                           </span>
+
+                          {/* Render Reactions */}
+                          {msg.reactions && Object.keys(msg.reactions).length > 0 && !msg.deletedForEveryone && (
+                            <div className={`flex flex-wrap gap-1 mt-1 -mb-2 relative z-10 ${isMe ? "justify-end" : "justify-start"}`}>
+                              {Object.entries(msg.reactions).map(([emoji, users]) => {
+                                if (!users || users.length === 0) return null;
+                                const hasReacted = users.includes(user?.email || "");
+                                return (
+                                  <button
+                                    key={emoji}
+                                    onClick={() => handleReaction(msg.id, emoji)}
+                                    className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border shadow-sm transition-colors ${hasReacted ? "bg-blue-100 border-blue-200" : "bg-white border-gray-200 hover:bg-gray-50"}`}
+                                  >
+                                    <span>{emoji}</span>
+                                    <span className="text-gray-500 font-medium">{users.length > 1 ? users.length : ""}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
 
                         {/* Delete Button for their message */}
@@ -880,6 +947,17 @@ export default function MessagesPage() {
                             title="Delete Message"
                           >
                             🗑️
+                          </button>
+                        )}
+
+                        {/* Reaction Button for their message */}
+                        {!isMe && !msg.deletedForEveryone && (
+                          <button 
+                            onClick={() => setActiveReactionMessageId(msg.id)}
+                            className="absolute -right-12 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-gray-600 transition-opacity"
+                            title="React"
+                          >
+                            😊
                           </button>
                         )}
                       </div>
@@ -997,6 +1075,18 @@ export default function MessagesPage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Emoji Picker Modal */}
+      {activeReactionMessageId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20" onClick={() => setActiveReactionMessageId(null)}>
+          <div className="shadow-2xl rounded-lg overflow-hidden animate-in fade-in zoom-in duration-200" onClick={(e) => e.stopPropagation()}>
+            <EmojiPicker 
+              onEmojiClick={(emojiData) => handleReaction(activeReactionMessageId, emojiData.emoji)} 
+              lazyLoadEmojis={true}
+            />
           </div>
         </div>
       )}

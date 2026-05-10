@@ -335,6 +335,19 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-sync lastMessage preview if the actual last message in the active chat is deleted
+  useEffect(() => {
+    if (messages.length > 0 && selectedChatData?.conversation?.id) {
+      const lastMsg = messages[messages.length - 1];
+      const isDeleted = lastMsg.deletedForEveryone || lastMsg.deletedFor?.includes(user?.email || "");
+      if (isDeleted && selectedChatData.conversation.lastMessage !== "🚫 This message was deleted") {
+        updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
+          lastMessage: "🚫 This message was deleted"
+        }).catch(console.error);
+      }
+    }
+  }, [messages, selectedChatData?.conversation, user?.email]);
+
   const handleDeleteMessage = (msg: Message) => {
     setDeleteModalMsg(msg);
   };

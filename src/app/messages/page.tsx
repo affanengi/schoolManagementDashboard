@@ -3,17 +3,113 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { db } from "@/lib/firebase";
+import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc } from "firebase/firestore";
+import { Conversation, Message } from "@/types/chat";
 
 export default function MessagesPage() {
   const { user, role } = useAuth();
   const currentRole = role || "student";
   
-  // Dummy state for selected conversation
-  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [newMessage, setNewMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Escape Hatch Link
+  const selectedConversation = conversations.find(c => c.id === selectedConversationId) || null;
   const homeLink = `/dashboard/${currentRole}`;
+
+  // Fetch Conversations
+  useEffect(() => {
+    if (!user?.email) return;
+
+    const q = query(
+      collection(db, "conversations"),
+      where("participants", "array-contains", user.email)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const convos = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Conversation[];
+      
+      // Sort by lastMessageTime descending
+      convos.sort((a, b) => {
+        const timeA = a.lastMessageTime?.toMillis?.() || 0;
+        const timeB = b.lastMessageTime?.toMillis?.() || 0;
+        return timeB - timeA;
+      });
+
+      setConversations(convos);
+    });
+
+    return () => unsubscribe();
+  }, [user?.email]);
+
+  // Fetch Messages for selected conversation
+  useEffect(() => {
+    if (!selectedConversationId) return;
+
+    const q = query(
+      collection(db, "messages"),
+      where("conversationId", "==", selectedConversationId),
+      orderBy("createdAt", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Message[];
+      setMessages(msgs);
+    });
+
+    return () => unsubscribe();
+  }, [selectedConversationId]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!newMessage.trim() || !selectedConversation || !user?.email) return;
+
+    const messageText = newMessage.trim();
+    setNewMessage(""); // Optimistic UI clear
+
+    try {
+      await addDoc(collection(db, "messages"), {
+        conversationId: selectedConversation.id,
+        senderId: user.email,
+        text: messageText,
+        createdAt: serverTimestamp(),
+      });
+
+      // Update conversation's last message
+      await updateDoc(doc(db, "conversations", selectedConversation.id), {
+        lastMessage: messageText,
+        lastMessageTime: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
+    }
+  };
+
+  const getOtherParticipant = (conv: Conversation) => {
+    if (!user?.email) return null;
+    return conv.participantDetails.find(p => p.email !== user.email) || conv.participantDetails[0];
+  };
+
+  const formatTime = (timestamp: any) => {
+    if (!timestamp) return "";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-gray-50 overflow-hidden">
@@ -62,40 +158,44 @@ export default function MessagesPage() {
             </div>
           </div>
 
-          {/* List of Chats (Dummy Data) */}
+          {/* List of Chats */}
           <div className="flex-1 overflow-y-auto">
-            {/* Dummy Item 1 */}
-            <div 
-              onClick={() => setSelectedConversation("1")}
-              className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${selectedConversation === "1" ? "bg-blue-50" : "hover:bg-gray-50"}`}
-            >
-              <Image src="/avatar.png" alt="" width={40} height={40} className="rounded-full" />
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-baseline mb-1">
-                  <h3 className="font-medium text-sm truncate">Affan Razvi</h3>
-                  <span className="text-[10px] text-gray-400">10:42 AM</span>
-                </div>
-                <p className="text-xs text-gray-500 truncate">Are you coming to class today?</p>
+            {conversations.length === 0 ? (
+              <div className="text-center text-gray-400 p-4 text-sm mt-4 flex flex-col items-center">
+                <Image src="/message.png" alt="" width={32} height={32} className="opacity-30 mb-2" />
+                No active conversations yet.
               </div>
-              <div className="w-4 h-4 bg-lamaPurple rounded-full flex items-center justify-center text-white text-[10px]">
-                2
-              </div>
-            </div>
+            ) : (
+              conversations.map(conv => {
+                const other = getOtherParticipant(conv);
+                const isSelected = selectedConversation?.id === conv.id;
+                const unreadCount = conv.unreadCount?.[user?.email || ""] || 0;
 
-            {/* Dummy Item 2 */}
-            <div 
-              onClick={() => setSelectedConversation("2")}
-              className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${selectedConversation === "2" ? "bg-blue-50" : "hover:bg-gray-50"}`}
-            >
-              <Image src="/avatar.png" alt="" width={40} height={40} className="rounded-full" />
-              <div className="flex-1 min-w-0">
-                <div className="flex justify-between items-baseline mb-1">
-                  <h3 className="font-medium text-sm truncate">John Doe</h3>
-                  <span className="text-[10px] text-gray-400">Yesterday</span>
-                </div>
-                <p className="text-xs text-gray-500 truncate">Thanks for the assignment details!</p>
-              </div>
-            </div>
+                return (
+                  <div 
+                    key={conv.id}
+                    onClick={() => setSelectedConversationId(conv.id)}
+                    className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${isSelected ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                  >
+                    <Image src={other?.avatar || "/avatar.png"} alt="" width={40} height={40} className="rounded-full object-cover w-[40px] h-[40px]" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline mb-1">
+                        <h3 className="font-medium text-sm truncate">{other?.name || "Unknown"}</h3>
+                        <span className="text-[10px] text-gray-400">{formatTime(conv.lastMessageTime)}</span>
+                      </div>
+                      <p className={`text-xs truncate ${unreadCount > 0 ? "text-gray-800 font-semibold" : "text-gray-500"}`}>
+                        {conv.lastMessage || "No messages yet"}
+                      </p>
+                    </div>
+                    {unreadCount > 0 && (
+                      <div className="w-4 h-4 bg-lamaPurple rounded-full flex items-center justify-center text-white text-[10px]">
+                        {unreadCount}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
           </div>
         </div>
 
@@ -108,14 +208,14 @@ export default function MessagesPage() {
                 <div className="flex items-center gap-3">
                   <button 
                     className="md:hidden mr-2 p-1 text-gray-500"
-                    onClick={() => setSelectedConversation(null)}
+                    onClick={() => setSelectedConversationId(null)}
                   >
                     ←
                   </button>
-                  <Image src="/avatar.png" alt="" width={36} height={36} className="rounded-full" />
+                  <Image src={getOtherParticipant(selectedConversation)?.avatar || "/avatar.png"} alt="" width={36} height={36} className="rounded-full object-cover w-[36px] h-[36px]" />
                   <div>
-                    <h3 className="font-semibold text-sm">Affan Razvi</h3>
-                    <span className="text-xs text-gray-500">Teacher</span>
+                    <h3 className="font-semibold text-sm">{getOtherParticipant(selectedConversation)?.name || "Unknown"}</h3>
+                    <span className="text-xs text-gray-500 capitalize">{getOtherParticipant(selectedConversation)?.role || "User"}</span>
                   </div>
                 </div>
                 <button className="text-gray-400 hover:text-gray-600">
@@ -125,49 +225,69 @@ export default function MessagesPage() {
 
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-                {/* Dummy Message Received */}
-                <div className="flex max-w-[80%] self-start gap-2">
-                  <Image src="/avatar.png" alt="" width={28} height={28} className="rounded-full self-end" />
-                  <div>
-                    <div className="bg-white p-3 rounded-2xl rounded-bl-none shadow-sm text-sm text-gray-700">
-                      Hello! Please make sure to submit your homework by tomorrow.
-                    </div>
-                    <span className="text-[10px] text-gray-400 mt-1 ml-1">10:40 AM</span>
+                {messages.length === 0 ? (
+                  <div className="text-center text-gray-400 p-4 text-sm mt-4">
+                    Send a message to start the chat.
                   </div>
-                </div>
-
-                {/* Dummy Message Sent */}
-                <div className="flex max-w-[80%] self-end gap-2">
-                  <div>
-                    <div className="bg-lamaSky p-3 rounded-2xl rounded-br-none shadow-sm text-sm text-white">
-                      Yes sir, I have already completed it. I will upload it soon!
-                    </div>
-                    <span className="text-[10px] text-gray-400 mt-1 mr-1 block text-right">10:42 AM</span>
-                  </div>
-                </div>
+                ) : (
+                  messages.map(msg => {
+                    const isMe = msg.senderId === user?.email;
+                    return (
+                      <div key={msg.id} className={`flex max-w-[80%] gap-2 ${isMe ? "self-end" : "self-start"}`}>
+                        {!isMe && (
+                          <Image 
+                            src={getOtherParticipant(selectedConversation)?.avatar || "/avatar.png"} 
+                            alt="" 
+                            width={28} 
+                            height={28} 
+                            className="rounded-full self-end object-cover w-[28px] h-[28px]" 
+                          />
+                        )}
+                        <div>
+                          <div className={`p-3 rounded-2xl shadow-sm text-sm ${isMe ? "bg-lamaSky text-white rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
+                            {msg.text}
+                          </div>
+                          <span className={`text-[10px] text-gray-400 mt-1 block ${isMe ? "text-right mr-1" : "ml-1"}`}>
+                            {formatTime(msg.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Message Input */}
               <div className="p-4 bg-white border-t border-gray-200 shrink-0">
-                <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-full border border-gray-200">
-                  <button className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                <form 
+                  onSubmit={handleSendMessage}
+                  className="flex items-center gap-2 bg-gray-50 p-2 rounded-full border border-gray-200"
+                >
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
                     📎
                   </button>
                   <input 
                     type="text" 
                     placeholder="Type a message..." 
                     className="flex-1 bg-transparent outline-none text-sm px-2"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
                   />
-                  <button className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
                     😀
                   </button>
-                  <button className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
+                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors">
                     🎤
                   </button>
-                  <button className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm">
+                  <button 
+                    type="submit" 
+                    disabled={!newMessage.trim()}
+                    className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     ➤
                   </button>
-                </div>
+                </form>
               </div>
             </>
           ) : (

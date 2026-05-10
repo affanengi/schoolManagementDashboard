@@ -148,8 +148,7 @@ export default function MessagesPage() {
 
     const q = query(
       collection(db, "messages"),
-      where("conversationId", "==", selectedConversationId),
-      orderBy("createdAt", "asc")
+      where("conversationId", "==", selectedConversationId)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -157,7 +156,17 @@ export default function MessagesPage() {
         id: doc.id,
         ...doc.data()
       })) as Message[];
+      
+      // Sort in memory to avoid needing a Firestore composite index
+      msgs.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || 0;
+        const timeB = b.createdAt?.toMillis?.() || 0;
+        return timeA - timeB; // Ascending order
+      });
+      
       setMessages(msgs);
+    }, (error) => {
+      console.error("Messages query error:", error);
     });
 
     return () => unsubscribe();

@@ -550,6 +550,8 @@ export async function resetAndSeedAllData(): Promise<{
     clearCollection("events"),
     clearCollection("announcements"),
     clearCollection("attendance"),
+    clearCollection("conversations"),
+    clearCollection("messages"),
   ]);
 
   // Step 2 — Seed teachers

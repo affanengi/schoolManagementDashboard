@@ -21,4 +21,5 @@ export type Message = {
   audioUrl?: string;
   reactions?: Record<string, string[]>; // e.g., { "thumbsUp": ["user1@email.com"] }
   createdAt: Date | any; // Firestore Timestamp
+  seen?: boolean;
 };

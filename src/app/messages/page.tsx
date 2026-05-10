@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDocs, setDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, orderBy, addDoc, serverTimestamp, doc, updateDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 import { Conversation, Message } from "@/types/chat";
 
 type Contact = {
@@ -21,6 +21,13 @@ const ADMIN_CONTACT: Contact = {
   avatar: "/avatar.png",
   role: "admin"
 };
+
+const DoubleTickIcon = ({ isRead }: { isRead: boolean }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isRead ? "#3b82f6" : "#9ca3af"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline-block ml-1">
+    <path d="M18 6 7 17l-5-5" />
+    <path d="m22 10-7.5 7.5L13 16" />
+  </svg>
+);
 
 export default function MessagesPage() {
   const { user, role } = useAuth();
@@ -172,10 +179,48 @@ export default function MessagesPage() {
     return () => unsubscribe();
   }, [selectedConversationId]);
 
+  // 5. Mark messages as read and clear unreadCount
+  useEffect(() => {
+    if (!selectedChatData?.conversation || !user?.email) return;
+
+    // Clear unread count for current user
+    const unread = selectedChatData.conversation.unreadCount?.[user.email];
+    if (unread && unread > 0) {
+      updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
+        [`unreadCount.${user.email}`]: 0
+      }).catch(console.error);
+    }
+  }, [selectedChatData, user?.email]);
+
+  useEffect(() => {
+    if (!user?.email || messages.length === 0) return;
+    
+    // Find unread messages sent by the OTHER person
+    const unreadMessages = messages.filter(m => m.senderId !== user.email && !m.seen);
+    
+    if (unreadMessages.length > 0) {
+      unreadMessages.forEach(msg => {
+        updateDoc(doc(db, "messages", msg.id), {
+          seen: true
+        }).catch(console.error);
+      });
+    }
+  }, [messages, user?.email]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (confirm("Delete this message?")) {
+      try {
+        await deleteDoc(doc(db, "messages", msgId));
+      } catch (error) {
+        console.error("Error deleting message:", error);
+      }
+    }
+  };
 
   const handleSendMessage = async (e?: React.FormEvent | React.KeyboardEvent) => {
     e?.preventDefault();
@@ -200,7 +245,10 @@ export default function MessagesPage() {
         ],
         lastMessage: messageText,
         lastMessageTime: serverTimestamp(),
-        // unreadCount handling can be added in Phase 6
+        unreadCount: {
+          [user.email]: selectedChatData.conversation?.unreadCount?.[user.email] || 0,
+          [contact.email]: (selectedChatData.conversation?.unreadCount?.[contact.email] || 0) + 1
+        }
       }, { merge: true });
 
       // Add message
@@ -209,6 +257,7 @@ export default function MessagesPage() {
         senderId: user.email,
         text: messageText,
         createdAt: serverTimestamp(),
+        seen: false
       });
 
     } catch (error) {
@@ -379,7 +428,19 @@ export default function MessagesPage() {
                     const showAvatar = !isMe && (idx === messages.length - 1 || messages[idx + 1].senderId !== msg.senderId);
                     
                     return (
-                      <div key={msg.id} className={`flex max-w-[80%] gap-2 ${isMe ? "self-end" : "self-start"}`}>
+                      <div key={msg.id} className={`group flex max-w-[80%] gap-2 relative ${isMe ? "self-end" : "self-start"}`}>
+                        
+                        {/* Delete Button for my message */}
+                        {isMe && (
+                          <button 
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity"
+                            title="Delete Message"
+                          >
+                            🗑️
+                          </button>
+                        )}
+
                         {!isMe && (
                           <div className="w-[28px] shrink-0 flex flex-col justify-end">
                             {showAvatar && (
@@ -397,10 +458,22 @@ export default function MessagesPage() {
                           <div className={`p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${isMe ? "bg-lamaSky text-gray-800 rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
                             {msg.text}
                           </div>
-                          <span className={`text-[10px] text-gray-400 mt-1 block ${isMe ? "text-right mr-1" : "ml-1"}`}>
+                          <span className={`text-[10px] text-gray-400 mt-1 flex items-center ${isMe ? "justify-end mr-1" : "ml-1"}`}>
                             {formatTime(msg.createdAt)}
+                            {isMe && <DoubleTickIcon isRead={!!msg.seen} />}
                           </span>
                         </div>
+
+                        {/* Delete Button for their message */}
+                        {!isMe && (
+                          <button 
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity"
+                            title="Delete Message"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </div>
                     );
                   })

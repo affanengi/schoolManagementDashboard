@@ -241,7 +241,9 @@ export default function MessagesPage() {
     });
 
     // Apply Filter
-    if (activeFilter !== "All") {
+    if (activeFilter === "Unread") {
+      list = list.filter(item => (item.conversation?.unreadCount?.[user?.email || ""] || 0) > 0);
+    } else if (activeFilter !== "All") {
       list = list.filter(item => item.contact.role.toLowerCase() === activeFilter.toLowerCase().replace(/s$/, ""));
     }
 
@@ -305,7 +307,10 @@ export default function MessagesPage() {
     const unread = selectedChatData.conversation.unreadCount?.[user.email];
     if (unread && unread > 0) {
       updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
-        [`unreadCount.${user.email}`]: 0
+        unreadCount: {
+          ...selectedChatData.conversation.unreadCount,
+          [user.email]: 0
+        }
       }).catch(console.error);
     }
   }, [selectedChatData, user?.email]);
@@ -343,6 +348,15 @@ export default function MessagesPage() {
       } else {
         const currentDeletedFor = deleteModalMsg.deletedFor || [];
         await updateDoc(msgRef, { deletedFor: [...currentDeletedFor, user.email] });
+      }
+
+      // Update the chat list preview if this was the last message
+      if (messages.length > 0 && messages[messages.length - 1].id === deleteModalMsg.id) {
+        if (selectedChatData?.conversation?.id) {
+          await updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
+            lastMessage: "🚫 This message was deleted"
+          });
+        }
       }
     } catch (error) {
       console.error("Error deleting message:", error);
@@ -571,11 +585,11 @@ export default function MessagesPage() {
   };
 
   // Determine available filters
-  let filters = ["All", "Admin", "Teachers"];
+  let filters = ["All", "Unread", "Admin", "Teachers"];
   if (currentRole === "admin") {
-    filters = ["All", "Teachers", "Students", "Parents"];
+    filters = ["All", "Unread", "Teachers", "Students", "Parents"];
   } else if (currentRole === "teacher") {
-    filters = ["All", "Admin", "Teachers", "Students", "Parents"];
+    filters = ["All", "Unread", "Admin", "Teachers", "Students", "Parents"];
   }
 
   const filteredMessages = messages.filter(msg => !msg.deletedFor?.includes(user?.email || ""));

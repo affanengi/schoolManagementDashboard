@@ -97,7 +97,7 @@ const Navebar = () => {
       </div>
 
       <div className="flex items-center gap-4 justify-end w-full">
-        <Link href="/list/messages" className="bg-white rounded-full w-6 h-6 flex items-center justify-center cursor-pointer relative hover:ring-2 ring-lamaPurple transition-all">
+        <Link href="/messages" className="bg-white rounded-full w-6 h-6 flex items-center justify-center cursor-pointer relative hover:ring-2 ring-lamaPurple transition-all">
           <Image src="/message.png" alt="" width={18} height={18} />
         </Link>
         <Link href="/list/announcements" className="bg-white rounded-full w-6 h-6 flex items-center justify-center cursor-pointer relative hover:ring-2 ring-lamaPurple transition-all">

@@ -32,6 +32,109 @@ const DoubleTickIcon = ({ isRead }: { isRead: boolean }) => (
 const CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/drxphrtzb/auto/upload";
 const CLOUDINARY_PRESET = "school_chat";
 
+const CustomAudioPlayer = ({ src }: { src: string }) => {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+
+  const togglePlayPause = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+      setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100 || 0);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      setDuration(audioRef.current.duration);
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (audioRef.current) {
+      const newTime = (Number(e.target.value) / 100) * duration;
+      audioRef.current.currentTime = newTime;
+      setProgress(Number(e.target.value));
+    }
+  };
+
+  const togglePlaybackRate = () => {
+    if (audioRef.current) {
+      let newRate = 1;
+      if (playbackRate === 1) newRate = 1.5;
+      else if (playbackRate === 1.5) newRate = 2;
+      else newRate = 1;
+      
+      audioRef.current.playbackRate = newRate;
+      setPlaybackRate(newRate);
+    }
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
+    const m = Math.floor(time / 60);
+    const s = Math.floor(time % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="flex items-center gap-3 bg-black/10 rounded-full px-3 py-1.5 w-[240px]">
+      <audio 
+        ref={audioRef} 
+        src={src} 
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={() => setIsPlaying(false)}
+      />
+      <button 
+        onClick={togglePlayPause} 
+        className="text-gray-700 hover:opacity-80 flex-shrink-0"
+      >
+        {isPlaying ? (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+        ) : (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        )}
+      </button>
+
+      <div className="flex-1 flex flex-col gap-1">
+        <input 
+          type="range" 
+          min="0" 
+          max="100" 
+          value={progress} 
+          onChange={handleSeek}
+          className="w-full h-1 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-[#00a884]"
+        />
+        <div className="flex justify-between items-center text-[10px] text-gray-500 font-medium">
+          <span>{formatTime(currentTime)}</span>
+        </div>
+      </div>
+
+      <button 
+        onClick={togglePlaybackRate}
+        className="bg-gray-200 text-gray-700 text-[10px] font-bold px-1.5 py-0.5 rounded-md hover:bg-gray-300 transition-colors"
+      >
+        {playbackRate}x
+      </button>
+    </div>
+  );
+};
+
 export default function MessagesPage() {
   const { user, role } = useAuth();
   const currentRole = role || "student";
@@ -50,6 +153,8 @@ export default function MessagesPage() {
 
   const [isUploading, setIsUploading] = useState(false);
   const [deleteModalMsg, setDeleteModalMsg] = useState<Message | null>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewCaption, setPreviewCaption] = useState("");
   
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -246,13 +351,19 @@ export default function MessagesPage() {
   };
 
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user?.email || !selectedChatData) return;
+    setPreviewFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const uploadPreviewFile = async () => {
+    if (!previewFile || !user?.email || !selectedChatData) return;
 
     setIsUploading(true);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", previewFile);
     formData.append("upload_preset", CLOUDINARY_PRESET);
 
     try {
@@ -263,7 +374,7 @@ export default function MessagesPage() {
       const data = await res.json();
       
       if (data.secure_url) {
-        const isPdf = file.type === "application/pdf";
+        const isPdf = previewFile.type === "application/pdf";
         const convId = selectedChatData.conversation?.id || [user.email, selectedChatData.contact.email].sort().join("_");
         const convRef = doc(db, "conversations", convId);
         
@@ -284,7 +395,7 @@ export default function MessagesPage() {
         await addDoc(collection(db, "messages"), {
           conversationId: convId,
           senderId: user.email,
-          text: "", 
+          text: previewCaption, 
           mediaUrl: data.secure_url,
           mediaType: isPdf ? "pdf" : "image",
           createdAt: serverTimestamp(),
@@ -293,10 +404,11 @@ export default function MessagesPage() {
       }
     } catch (err) {
       console.error("Upload error:", err);
-      alert("Failed to upload file. Check Cloudinary settings.");
+      alert("Failed to upload file.");
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setPreviewFile(null);
+      setPreviewCaption("");
     }
   };
 
@@ -578,7 +690,66 @@ export default function MessagesPage() {
         </div>
 
         {/* Right Column: Chat Window */}
-        <div className={`flex-1 flex flex-col bg-[#F7F8FA] ${!selectedContactEmail ? 'hidden md:flex' : 'flex'}`}>
+        <div className={`flex-1 flex flex-col bg-[#F7F8FA] relative ${!selectedContactEmail ? 'hidden md:flex' : 'flex'}`}>
+          {previewFile ? (
+            <div className="absolute inset-0 z-50 bg-[#E9EDEF] flex flex-col">
+              {/* Preview Header */}
+              <div className="h-16 flex items-center px-4 justify-between bg-[#F0F2F5] shadow-sm shrink-0">
+                <div className="flex items-center gap-4">
+                  <button onClick={() => { setPreviewFile(null); setPreviewCaption(""); }} className="p-2 text-gray-500 hover:bg-gray-200 rounded-full transition-colors">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                  <h3 className="font-semibold text-lg text-gray-800">Preview</h3>
+                </div>
+              </div>
+              {/* Preview Content */}
+              <div className="flex-1 overflow-auto flex items-center justify-center p-8 bg-[#E9EDEF]">
+                {previewFile.type.startsWith("image/") ? (
+                   <img src={URL.createObjectURL(previewFile)} alt="Preview" className="max-w-full max-h-full object-contain drop-shadow-md rounded-md" />
+                ) : (
+                  <div className="bg-[#202C33] p-12 rounded-xl shadow-lg flex flex-col items-center gap-4 text-white">
+                     <div className="w-16 h-20 bg-white/10 rounded flex items-center justify-center text-white text-3xl">📄</div>
+                     <p className="font-medium">No preview available</p>
+                     <p className="text-sm opacity-60">{Math.round(previewFile.size / 1024)} KB - PDF</p>
+                  </div>
+                )}
+              </div>
+              {/* Preview Input */}
+              <div className="p-4 bg-[#F0F2F5] shrink-0">
+                <div className="max-w-3xl mx-auto flex items-end gap-2 bg-white px-2 py-1.5 rounded-xl shadow-sm">
+                   <button type="button" className="p-2 text-gray-400 hover:text-gray-600 shrink-0">
+                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                   </button>
+                   <textarea 
+                     placeholder="Add a caption..." 
+                     className="flex-1 bg-transparent outline-none text-sm px-2 py-2.5 resize-none max-h-[120px]"
+                     rows={Math.max(1, Math.min(5, previewCaption.split('\n').length))}
+                     value={previewCaption}
+                     onChange={(e) => setPreviewCaption(e.target.value)}
+                     disabled={isUploading}
+                     onKeyDown={(e) => {
+                       if (e.key === "Enter" && !e.shiftKey) {
+                         e.preventDefault();
+                         uploadPreviewFile();
+                       }
+                     }}
+                   />
+                   <button 
+                     onClick={uploadPreviewFile}
+                     disabled={isUploading}
+                     className="bg-[#00a884] text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#008f6f] transition-colors shadow-md disabled:opacity-50 shrink-0 mb-0.5"
+                   >
+                     {isUploading ? (
+                       <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                     ) : (
+                       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                     )}
+                   </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {selectedChatData ? (
             <>
               {/* Chat Header */}
@@ -653,7 +824,7 @@ export default function MessagesPage() {
                               {msg.mediaUrl && (
                                 <div className="mb-2">
                                   {msg.mediaType === "audio" ? (
-                                    <audio controls src={msg.mediaUrl} className="max-w-[200px] h-10" />
+                                    <CustomAudioPlayer src={msg.mediaUrl} />
                                   ) : msg.mediaType === "image" ? (
                                     <a href={msg.mediaUrl} target="_blank" rel="noreferrer">
                                       <Image src={msg.mediaUrl} alt="Shared Image" width={200} height={200} className="rounded-lg object-cover" />

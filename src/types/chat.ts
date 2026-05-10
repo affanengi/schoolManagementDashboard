@@ -22,4 +22,8 @@ export type Message = {
   reactions?: Record<string, string[]>; // e.g., { "thumbsUp": ["user1@email.com"] }
   createdAt: Date | any; // Firestore Timestamp
   seen?: boolean;
+  deletedForEveryone?: boolean;
+  deletedFor?: string[]; // Array of emails
+  mediaUrl?: string;
+  mediaType?: "image" | "pdf" | "audio";
 };

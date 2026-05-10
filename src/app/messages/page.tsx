@@ -29,6 +29,9 @@ const DoubleTickIcon = ({ isRead }: { isRead: boolean }) => (
   </svg>
 );
 
+const CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/drxphrtzb/auto/upload";
+const CLOUDINARY_PRESET = "school_chat";
+
 export default function MessagesPage() {
   const { user, role } = useAuth();
   const currentRole = role || "student";
@@ -43,6 +46,16 @@ export default function MessagesPage() {
   const [newMessage, setNewMessage] = useState("");
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isUploading, setIsUploading] = useState(false);
+  const [deleteModalMsg, setDeleteModalMsg] = useState<Message | null>(null);
+  
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const homeLink = `/dashboard/${currentRole}`;
 
@@ -212,13 +225,181 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleDeleteMessage = async (msgId: string) => {
-    if (confirm("Delete this message?")) {
-      try {
-        await deleteDoc(doc(db, "messages", msgId));
-      } catch (error) {
-        console.error("Error deleting message:", error);
+  const handleDeleteMessage = (msg: Message) => {
+    setDeleteModalMsg(msg);
+  };
+
+  const handleConfirmDelete = async (type: "me" | "everyone") => {
+    if (!deleteModalMsg || !user?.email) return;
+    try {
+      const msgRef = doc(db, "messages", deleteModalMsg.id);
+      if (type === "everyone") {
+        await updateDoc(msgRef, { deletedForEveryone: true });
+      } else {
+        const currentDeletedFor = deleteModalMsg.deletedFor || [];
+        await updateDoc(msgRef, { deletedFor: [...currentDeletedFor, user.email] });
       }
+    } catch (error) {
+      console.error("Error deleting message:", error);
+    }
+    setDeleteModalMsg(null);
+  };
+
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user?.email || !selectedChatData) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_PRESET);
+
+    try {
+      const res = await fetch(CLOUDINARY_URL, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      
+      if (data.secure_url) {
+        const isPdf = file.type === "application/pdf";
+        const convId = selectedChatData.conversation?.id || [user.email, selectedChatData.contact.email].sort().join("_");
+        const convRef = doc(db, "conversations", convId);
+        
+        await setDoc(convRef, {
+          participants: [user.email, selectedChatData.contact.email],
+          participantDetails: [
+            { email: user.email, name: user.displayName || user.email.split('@')[0], avatar: user.photoURL || "/avatar.png", role: currentRole },
+            { email: selectedChatData.contact.email, name: selectedChatData.contact.name, avatar: selectedChatData.contact.avatar, role: selectedChatData.contact.role }
+          ],
+          lastMessage: isPdf ? "📄 PDF Document" : "📷 Image",
+          lastMessageTime: serverTimestamp(),
+          unreadCount: {
+            [user.email]: selectedChatData.conversation?.unreadCount?.[user.email] || 0,
+            [selectedChatData.contact.email]: (selectedChatData.conversation?.unreadCount?.[selectedChatData.contact.email] || 0) + 1
+          }
+        }, { merge: true });
+
+        await addDoc(collection(db, "messages"), {
+          conversationId: convId,
+          senderId: user.email,
+          text: "", 
+          mediaUrl: data.secure_url,
+          mediaType: isPdf ? "pdf" : "image",
+          createdAt: serverTimestamp(),
+          seen: false
+        });
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert("Failed to upload file. Check Cloudinary settings.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const uploadAudio = async (audioBlob: Blob) => {
+    if (audioBlob.size === 0 || !user?.email || !selectedChatData) return;
+    
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", audioBlob, "voicenote.webm");
+    formData.append("upload_preset", CLOUDINARY_PRESET);
+
+    try {
+      const res = await fetch(CLOUDINARY_URL, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      
+      if (data.secure_url) {
+        const convId = selectedChatData.conversation?.id || [user.email, selectedChatData.contact.email].sort().join("_");
+        const convRef = doc(db, "conversations", convId);
+        
+        await setDoc(convRef, {
+          participants: [user.email, selectedChatData.contact.email],
+          participantDetails: [
+            { email: user.email, name: user.displayName || user.email.split('@')[0], avatar: user.photoURL || "/avatar.png", role: currentRole },
+            { email: selectedChatData.contact.email, name: selectedChatData.contact.name, avatar: selectedChatData.contact.avatar, role: selectedChatData.contact.role }
+          ],
+          lastMessage: "🎤 Voice Note",
+          lastMessageTime: serverTimestamp(),
+          unreadCount: {
+            [user.email]: selectedChatData.conversation?.unreadCount?.[user.email] || 0,
+            [selectedChatData.contact.email]: (selectedChatData.conversation?.unreadCount?.[selectedChatData.contact.email] || 0) + 1
+          }
+        }, { merge: true });
+
+        await addDoc(collection(db, "messages"), {
+          conversationId: convId,
+          senderId: user.email,
+          text: "", 
+          mediaUrl: data.secure_url,
+          mediaType: "audio",
+          createdAt: serverTimestamp(),
+          seen: false
+        });
+      }
+    } catch (err) {
+      console.error("Audio upload error:", err);
+      alert("Failed to send voice note. Check Cloudinary settings.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          await uploadAudio(audioBlob);
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+      
+    } catch (err) {
+      console.error("Microphone access error:", err);
+      alert("Microphone access is required to send voice notes.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      audioChunksRef.current = []; // Empty chunks so it doesn't upload
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     }
   };
 
@@ -271,6 +452,12 @@ export default function MessagesPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   // Determine available filters
   let filters = ["All", "Admin", "Teachers"];
   if (currentRole === "admin") {
@@ -278,6 +465,8 @@ export default function MessagesPage() {
   } else if (currentRole === "teacher") {
     filters = ["All", "Admin", "Teachers", "Students", "Parents"];
   }
+
+  const filteredMessages = messages.filter(msg => !msg.deletedFor?.includes(user?.email || ""));
 
   return (
     <div className="h-screen w-full flex flex-col bg-gray-50 overflow-hidden">
@@ -414,7 +603,7 @@ export default function MessagesPage() {
 
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-                {messages.length === 0 ? (
+                {filteredMessages.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-gray-400 text-sm mt-4">
                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
                       <Image src={selectedChatData.contact.avatar} alt="" width={48} height={48} className="rounded-full object-cover w-[48px] h-[48px]" />
@@ -422,18 +611,18 @@ export default function MessagesPage() {
                     Say hello to {selectedChatData.contact.name}!
                   </div>
                 ) : (
-                  messages.map((msg, idx) => {
+                  filteredMessages.map((msg, idx) => {
                     const isMe = msg.senderId === user?.email;
                     // Show avatar if it's the last message in a sequence from the other person
-                    const showAvatar = !isMe && (idx === messages.length - 1 || messages[idx + 1].senderId !== msg.senderId);
+                    const showAvatar = !isMe && (idx === filteredMessages.length - 1 || filteredMessages[idx + 1].senderId !== msg.senderId);
                     
                     return (
                       <div key={msg.id} className={`group flex max-w-[80%] gap-2 relative ${isMe ? "self-end" : "self-start"}`}>
                         
                         {/* Delete Button for my message */}
-                        {isMe && (
+                        {isMe && !msg.deletedForEveryone && (
                           <button 
-                            onClick={() => handleDeleteMessage(msg.id)}
+                            onClick={() => handleDeleteMessage(msg)}
                             className="absolute -left-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity"
                             title="Delete Message"
                           >
@@ -455,19 +644,40 @@ export default function MessagesPage() {
                           </div>
                         )}
                         <div>
-                          <div className={`p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${isMe ? "bg-lamaSky text-gray-800 rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
-                            {msg.text}
-                          </div>
+                          {msg.deletedForEveryone ? (
+                            <div className={`p-3 rounded-2xl shadow-sm text-sm italic text-gray-400 border border-gray-200 ${isMe ? "bg-lamaSkyLight rounded-br-none" : "bg-gray-50 rounded-bl-none"}`}>
+                              🚫 This message was deleted
+                            </div>
+                          ) : (
+                            <div className={`p-3 rounded-2xl shadow-sm text-sm whitespace-pre-wrap ${isMe ? "bg-lamaSky text-gray-800 rounded-br-none" : "bg-white text-gray-700 rounded-bl-none"}`}>
+                              {msg.mediaUrl && (
+                                <div className="mb-2">
+                                  {msg.mediaType === "audio" ? (
+                                    <audio controls src={msg.mediaUrl} className="max-w-[200px] h-10" />
+                                  ) : msg.mediaType === "image" ? (
+                                    <a href={msg.mediaUrl} target="_blank" rel="noreferrer">
+                                      <Image src={msg.mediaUrl} alt="Shared Image" width={200} height={200} className="rounded-lg object-cover" />
+                                    </a>
+                                  ) : (
+                                    <a href={msg.mediaUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-600 bg-blue-50 p-2 rounded-lg hover:underline">
+                                      📄 <span>View PDF</span>
+                                    </a>
+                                  )}
+                                </div>
+                              )}
+                              {msg.text}
+                            </div>
+                          )}
                           <span className={`text-[10px] text-gray-400 mt-1 flex items-center ${isMe ? "justify-end mr-1" : "ml-1"}`}>
                             {formatTime(msg.createdAt)}
-                            {isMe && <DoubleTickIcon isRead={!!msg.seen} />}
+                            {isMe && !msg.deletedForEveryone && <DoubleTickIcon isRead={!!msg.seen} />}
                           </span>
                         </div>
 
                         {/* Delete Button for their message */}
-                        {!isMe && (
+                        {!isMe && !msg.deletedForEveryone && (
                           <button 
-                            onClick={() => handleDeleteMessage(msg.id)}
+                            onClick={() => handleDeleteMessage(msg)}
                             className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity"
                             title="Delete Message"
                           >
@@ -483,40 +693,68 @@ export default function MessagesPage() {
 
               {/* Message Input */}
               <div className="p-4 bg-white border-t border-gray-200 shrink-0">
-                <form 
-                  onSubmit={handleSendMessage}
-                  className="flex items-end gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200"
-                >
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0">
-                    📎
-                  </button>
-                  <textarea 
-                    placeholder="Type a message..." 
-                    className="flex-1 bg-transparent outline-none text-sm px-2 resize-none py-2 scrollbar-hide max-h-[120px]"
-                    rows={Math.max(1, Math.min(5, newMessage.split('\n').length))}
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage(e);
-                      }
-                    }}
-                  />
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
-                    😀
-                  </button>
-                  <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
-                    🎤
-                  </button>
-                  <button 
-                    type="submit" 
-                    disabled={!newMessage.trim()}
-                    className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0 mb-1"
+                {isRecording ? (
+                  <div className="flex items-center justify-between bg-red-50 p-2 rounded-2xl border border-red-200">
+                    <div className="flex items-center gap-3 px-3 text-red-500 font-medium text-sm">
+                      <div className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></div>
+                      Recording... {formatRecordingTime(recordingTime)}
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={cancelRecording} className="text-gray-500 hover:text-red-600 px-3 py-1 text-sm font-medium">Cancel</button>
+                      <button type="button" onClick={stopRecording} className="bg-red-500 text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shrink-0">
+                        ➤
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <form 
+                    onSubmit={handleSendMessage}
+                    className="flex items-end gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200 relative"
                   >
-                    ➤
-                  </button>
-                </form>
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      hidden 
+                      onChange={handleFileUpload} 
+                      accept="image/*,application/pdf" 
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0"
+                      disabled={isUploading}
+                    >
+                      📎
+                    </button>
+                    <textarea 
+                      placeholder={isUploading ? "Uploading..." : "Type a message..."} 
+                      className="flex-1 bg-transparent outline-none text-sm px-2 resize-none py-2 scrollbar-hide max-h-[120px]"
+                      rows={Math.max(1, Math.min(5, newMessage.split('\n').length))}
+                      value={newMessage}
+                      disabled={isUploading}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendMessage(e);
+                        }
+                      }}
+                    />
+                    <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
+                      😀
+                    </button>
+                    <button type="button" onClick={startRecording} disabled={isUploading} className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1 disabled:opacity-50">
+                      🎤
+                    </button>
+                    <button 
+                      type="submit" 
+                      disabled={!newMessage.trim() || isUploading}
+                      className="bg-lamaSky text-white w-8 h-8 rounded-full flex items-center justify-center hover:bg-blue-400 transition-colors ml-1 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0 mb-1"
+                    >
+                      ➤
+                    </button>
+                  </form>
+                )}
               </div>
             </>
           ) : (
@@ -530,6 +768,40 @@ export default function MessagesPage() {
           )}
         </div>
       </div>
+      {/* Delete Confirmation Modal */}
+      {deleteModalMsg && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-sm w-full overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-5">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete message?</h3>
+              <p className="text-sm text-gray-500">This action cannot be undone.</p>
+            </div>
+            <div className="flex flex-col border-t border-gray-100">
+              {/* Show 'Delete for everyone' if it's my message OR if I am an Admin */}
+              {(deleteModalMsg.senderId === user?.email || currentRole === "admin") && (
+                <button 
+                  onClick={() => handleConfirmDelete("everyone")}
+                  className="w-full py-3 text-red-500 font-medium hover:bg-gray-50 transition-colors border-b border-gray-100"
+                >
+                  Delete for everyone
+                </button>
+              )}
+              <button 
+                onClick={() => handleConfirmDelete("me")}
+                className="w-full py-3 text-red-500 font-medium hover:bg-gray-50 transition-colors border-b border-gray-100"
+              >
+                Delete for me
+              </button>
+              <button 
+                onClick={() => setDeleteModalMsg(null)}
+                className="w-full py-3 text-gray-600 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

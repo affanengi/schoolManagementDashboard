@@ -340,33 +340,43 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-sync lastMessage preview if the actual last message in the active chat is deleted
+  // Auto-sync lastMessage preview: always derive correct text from real messages
   useEffect(() => {
     if (messages.length === 0 || !selectedChatData?.conversation?.id || !user?.email) return;
 
-    // Find the last message visible to the current user (not deleted for them)
-    const visibleMessages = messages.filter(
-      m => !m.deletedForEveryone && !m.deletedFor?.includes(user.email!)
-    );
+    // All messages, ordered oldest→newest (already sorted by the listener)
+    const allMessages = messages;
 
-    const convLastMsg = selectedChatData.conversation.lastMessage || "";
+    // Walk backwards to find what the sidebar SHOULD show for the current user
+    let correctPreview = "";
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const m = allMessages[i];
 
-    if (visibleMessages.length === 0) {
-      // All messages deleted — clear preview
-      if (convLastMsg !== "") {
-        updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
-          lastMessage: ""
-        }).catch(console.error);
+      if (m.deletedForEveryone) {
+        // Deleted for everyone — show deleted label and stop
+        correctPreview = "🚫 This message was deleted";
+        break;
       }
-    } else {
-      // The last visible message text (or media label)
-      const lastVisible = visibleMessages[visibleMessages.length - 1];
-      const isLastMsgDeleted = lastVisible.deletedForEveryone || lastVisible.deletedFor?.includes(user.email!);
-      if (isLastMsgDeleted && convLastMsg !== "🚫 This message was deleted") {
-        updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
-          lastMessage: "🚫 This message was deleted"
-        }).catch(console.error);
+
+      if (m.deletedFor?.includes(user.email!)) {
+        // Deleted only for me — skip, look at the one before it
+        continue;
       }
+
+      // This message is visible to the current user — derive preview text
+      if (m.mediaType === "image") correctPreview = "📷 Image";
+      else if (m.mediaType === "audio") correctPreview = "🎤 Voice Note";
+      else if (m.mediaType === "pdf") correctPreview = "📄 PDF Document";
+      else correctPreview = m.text || "";
+      break;
+    }
+
+    // Only write back if Firestore is out of sync
+    const storedPreview = selectedChatData.conversation.lastMessage || "";
+    if (storedPreview !== correctPreview) {
+      updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
+        lastMessage: correctPreview
+      }).catch(console.error);
     }
   }, [messages, selectedChatData?.conversation?.id, selectedChatData?.conversation?.lastMessage, user?.email]);
 

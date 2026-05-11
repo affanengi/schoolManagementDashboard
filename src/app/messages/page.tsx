@@ -158,6 +158,8 @@ export default function MessagesPage() {
   const [previewCaption, setPreviewCaption] = useState("");
   
   const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null);
+  const [showInputEmoji, setShowInputEmoji] = useState(false);
+  const [reactionViewerMsg, setReactionViewerMsg] = useState<Message | null>(null);
   
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -340,16 +342,33 @@ export default function MessagesPage() {
 
   // Auto-sync lastMessage preview if the actual last message in the active chat is deleted
   useEffect(() => {
-    if (messages.length > 0 && selectedChatData?.conversation?.id) {
-      const lastMsg = messages[messages.length - 1];
-      const isDeleted = lastMsg.deletedForEveryone || lastMsg.deletedFor?.includes(user?.email || "");
-      if (isDeleted && selectedChatData.conversation.lastMessage !== "🚫 This message was deleted") {
+    if (messages.length === 0 || !selectedChatData?.conversation?.id || !user?.email) return;
+
+    // Find the last message visible to the current user (not deleted for them)
+    const visibleMessages = messages.filter(
+      m => !m.deletedForEveryone && !m.deletedFor?.includes(user.email!)
+    );
+
+    const convLastMsg = selectedChatData.conversation.lastMessage || "";
+
+    if (visibleMessages.length === 0) {
+      // All messages deleted — clear preview
+      if (convLastMsg !== "") {
+        updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
+          lastMessage: ""
+        }).catch(console.error);
+      }
+    } else {
+      // The last visible message text (or media label)
+      const lastVisible = visibleMessages[visibleMessages.length - 1];
+      const isLastMsgDeleted = lastVisible.deletedForEveryone || lastVisible.deletedFor?.includes(user.email!);
+      if (isLastMsgDeleted && convLastMsg !== "🚫 This message was deleted") {
         updateDoc(doc(db, "conversations", selectedChatData.conversation.id), {
           lastMessage: "🚫 This message was deleted"
         }).catch(console.error);
       }
     }
-  }, [messages, selectedChatData?.conversation, user?.email]);
+  }, [messages, selectedChatData?.conversation?.id, selectedChatData?.conversation?.lastMessage, user?.email]);
 
   const handleDeleteMessage = (msg: Message) => {
     setDeleteModalMsg(msg);
@@ -927,11 +946,11 @@ export default function MessagesPage() {
                                 return (
                                   <button
                                     key={emoji}
-                                    onClick={() => handleReaction(msg.id, emoji)}
+                                    onClick={() => setReactionViewerMsg(msg)}
                                     className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border shadow-sm transition-colors ${hasReacted ? "bg-blue-100 border-blue-200" : "bg-white border-gray-200 hover:bg-gray-50"}`}
                                   >
                                     <span>{emoji}</span>
-                                    <span className="text-gray-500 font-medium">{users.length > 1 ? users.length : ""}</span>
+                                    <span className="text-gray-500 font-medium">{users.length}</span>
                                   </button>
                                 );
                               })}
@@ -1016,9 +1035,22 @@ export default function MessagesPage() {
                         }
                       }}
                     />
-                    <button type="button" className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
-                      😀
-                    </button>
+                    <div className="relative">
+                      <button type="button" onClick={() => setShowInputEmoji(v => !v)} className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1">
+                        😀
+                      </button>
+                      {showInputEmoji && (
+                        <div className="absolute bottom-12 right-0 z-50 shadow-2xl rounded-lg overflow-hidden">
+                          <EmojiPicker
+                            onEmojiClick={(emojiData) => {
+                              setNewMessage(prev => prev + emojiData.emoji);
+                              setShowInputEmoji(false);
+                            }}
+                            lazyLoadEmojis={true}
+                          />
+                        </div>
+                      )}
+                    </div>
                     <button type="button" onClick={startRecording} disabled={isUploading} className="p-2 text-gray-400 hover:text-lamaSky transition-colors shrink-0 mb-1 disabled:opacity-50">
                       🎤
                     </button>
@@ -1087,6 +1119,72 @@ export default function MessagesPage() {
               onEmojiClick={(emojiData) => handleReaction(activeReactionMessageId, emojiData.emoji)} 
               lazyLoadEmojis={true}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Reaction Viewer Modal (WhatsApp-style) */}
+      {reactionViewerMsg && reactionViewerMsg.reactions && (
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40" onClick={() => setReactionViewerMsg(null)}>
+          <div className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Header with reaction tab totals */}
+            <div className="flex items-center gap-3 px-4 pt-4 pb-2 border-b border-gray-100">
+              <span className="text-sm font-semibold text-gray-700">
+                {Object.values(reactionViewerMsg.reactions).flat().length} Reactions
+              </span>
+              <div className="flex gap-2 ml-auto">
+                {Object.entries(reactionViewerMsg.reactions).map(([emoji, users]) =>
+                  users && users.length > 0 ? (
+                    <span key={emoji} className="text-sm">{emoji} {users.length}</span>
+                  ) : null
+                )}
+              </div>
+            </div>
+
+            {/* Reactor list */}
+            <div className="max-h-72 overflow-y-auto">
+              {Object.entries(reactionViewerMsg.reactions).flatMap(([emoji, users]) =>
+                (users || []).map(reactorEmail => {
+                  const isMe = reactorEmail === user?.email;
+                  const displayName = isMe ? "You" : reactorEmail.split("@")[0];
+                  return (
+                    <div key={`${emoji}-${reactorEmail}`} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0">
+                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-600 shrink-0 uppercase">
+                        {displayName[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
+                        {isMe && (
+                          <button
+                            onClick={() => { handleReaction(reactionViewerMsg.id, emoji); setReactionViewerMsg(null); }}
+                            className="text-[11px] text-red-400 hover:text-red-600 mt-0.5"
+                          >
+                            Click to remove
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-xl">{emoji}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Add/change reaction footer */}
+            <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-t border-gray-100">
+              <button
+                onClick={() => { setActiveReactionMessageId(reactionViewerMsg.id); setReactionViewerMsg(null); }}
+                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800 font-medium px-3 py-1.5 bg-white rounded-full border border-gray-200 shadow-sm hover:shadow-md transition-all"
+              >
+                <span>😊</span> Add Reaction
+              </button>
+              <button
+                onClick={() => setReactionViewerMsg(null)}
+                className="ml-auto text-sm text-gray-400 hover:text-gray-600"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -32,7 +32,7 @@ const Homepage = () => {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 z-10">
-          <Link href="/sign-in" className="bg-lamaPurple text-white px-8 py-3 rounded-full font-semibold text-lg hover:bg-lamaPurpleLight transition-all shadow-md hover:shadow-lg">
+          <Link href="/sign-up" className="bg-lamaPurple text-white px-8 py-3 rounded-full font-semibold text-lg hover:bg-lamaPurpleLight transition-all shadow-md hover:shadow-lg">
             Get Started
           </Link>
           <Link href="/dashboard/admin" className="bg-white text-gray-700 border border-gray-300 px-8 py-3 rounded-full font-semibold text-lg hover:bg-gray-50 transition-all shadow-sm">

@@ -69,7 +69,23 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
               const studentSnap = await getDocs(
                 query(collection(db, "students"), where("email", "==", currentUser.email))
               );
-              currentRole = !studentSnap.empty ? "student" : "student";
+              if (!studentSnap.empty) {
+                currentRole = "student";
+              } else {
+                const parentSnap = await getDocs(
+                  query(collection(db, "parents"), where("email", "==", currentUser.email))
+                );
+                if (!parentSnap.empty) {
+                  currentRole = "parent";
+                } else {
+                  // ⛔ User is authenticated with Google/Firebase but NOT registered
+                  // in any school collection. Sign them out to prevent unauthorised access.
+                  await auth.signOut();
+                  setAuthState({ user: null, role: null, loading: false });
+                  router.push("/sign-in?error=not_registered");
+                  return;
+                }
+              }
             }
           }
           // Cache the detected role

@@ -3,14 +3,20 @@
 import { useState } from "react";
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 
 const SignInPage = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const searchParams = useSearchParams();
+  const notRegistered = searchParams.get("error") === "not_registered";
+  const [error, setError] = useState(
+    notRegistered
+      ? "Your Google account is not registered in this school system. Please contact your administrator."
+      : ""
+  );
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
